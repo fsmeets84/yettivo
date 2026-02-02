@@ -17,7 +17,8 @@ export default function AddToWatchlistButton({ item }: { item: WatchlistItem }) 
 
   const handleToggle = () => {
     if (added) {
-      removeFromWatchlist(item.tmdbId);
+      // FIX: Voeg item.type toe als tweede argument om de TypeScript error op te lossen
+      removeFromWatchlist(item.tmdbId, item.type);
     } else {
       addToWatchlist(item);
     }
