@@ -15,7 +15,6 @@ import {
 import { 
   BookmarkIcon as BookmarkSolid, 
   EyeIcon as EyeSolid,
-  CheckCircleIcon as CheckSolid 
 } from "@heroicons/react/24/solid";
 
 function SearchContent() {
@@ -30,7 +29,8 @@ function SearchContent() {
     addToWatchlist, 
     removeFromWatchlist, 
     isMovieWatched, 
-    toggleWatched 
+    toggleWatched,
+    watchlist // Nodig om progressie te checken
   } = useWatchlist();
 
   useEffect(() => {
@@ -63,14 +63,12 @@ function SearchContent() {
     <main className="min-h-screen bg-transparent pt-32 pb-20 relative overflow-hidden">
       <div className="container mx-auto px-8 relative z-10">
         
-        {/* Search Header */}
         <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 mb-16">
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-[#3b82f6] mb-1">
               <MagnifyingGlassIcon className="h-4 w-4" />
               <span className="text-[10px] font-bold tracking-wider uppercase">Archive Search</span>
             </div>
-            {/* Titel nu in normale letters */}
             <h1 className="text-4xl font-semibold text-white tracking-tight leading-none">
               {query ? `Results for "${query}"` : "Start searching"}
             </h1>
@@ -79,7 +77,6 @@ function SearchContent() {
             </p>
           </div>
 
-          {/* Filter Controls */}
           <div className="flex items-center gap-2 p-1.5 rounded-[2px] glass-card border border-white/5 bg-white/5 backdrop-blur-md">
             <FilterBtn active={filter === "all"} label="All" onClick={() => setFilter("all")} />
             <FilterBtn active={filter === "movie"} label="Movies" onClick={() => setFilter("movie")} />
@@ -96,27 +93,42 @@ function SearchContent() {
             {filteredResults.map((item) => {
               const isAdded = isInWatchlist(item.id);
               const isWatched = isMovieWatched(item.id);
+              // Bepaal het type voor de functies
+              const mediaType: 'movie' | 'tv' = item.media_type === 'tv' ? 'tv' : 'movie';
 
               const handleWatchlistClick = (e: React.MouseEvent) => {
                 e.preventDefault();
-                isAdded ? removeFromWatchlist(item.id) : addToWatchlist({
-                  tmdbId: item.id,
-                  title: item.title || item.name,
-                  posterPath: item.poster_path,
-                  type: item.media_type === 'tv' ? 'tv' : 'movie',
-                  voteAverage: item.vote_average
-                });
+                // FIX: Voeg mediaType toe aan removeFromWatchlist
+                isAdded 
+                  ? removeFromWatchlist(item.id, mediaType) 
+                  : addToWatchlist({
+                      tmdbId: item.id,
+                      title: item.title || item.name,
+                      posterPath: item.poster_path,
+                      type: mediaType,
+                      voteAverage: item.vote_average
+                    });
               };
 
               const handleWatchedClick = (e: React.MouseEvent) => {
                 e.preventDefault();
-                toggleWatched(item.id);
+                // FIX: toggleWatched verwacht id en optioneel movieData
+                toggleWatched(item.id, {
+                  title: item.title || item.name,
+                  posterPath: item.poster_path,
+                  type: mediaType,
+                  voteAverage: item.vote_average
+                });
               };
+
+              // Progressie checken via de context watchlist ipv localStorage
+              const itemInDb = watchlist.find(i => String(i.tmdbId) === String(item.id));
+              const hasProgress = (itemInDb?.watchedEpisodes?.length ?? 0) > 0;
 
               return (
                 <Link 
                   key={item.id} 
-                  href={`/${item.media_type === 'tv' ? 'tv' : 'movie'}/${item.id}`}
+                  href={`/${mediaType}/${item.id}`}
                   className="group block space-y-4"
                 >
                   <div className="relative aspect-[2/3] glass-card overflow-hidden transition-all duration-500 group-hover:border-[#3b82f6]/40 group-hover:shadow-[0_0_40px_rgba(37,99,235,0.25)] rounded-[2px] border border-white/5">
@@ -136,7 +148,19 @@ function SearchContent() {
 
                     <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-black/90 via-black/20 to-transparent z-20 pointer-events-none" />
 
-                    <ArchiveStatus item={item} isWatched={isWatched} />
+                    {/* Status badges */}
+                    <div className="absolute bottom-3 left-3 z-30">
+                      {isWatched ? (
+                        <div className="px-2 py-1 bg-[#10b981] text-white text-[8px] font-black uppercase tracking-tighter shadow-lg rounded-[1px]">
+                          Completed
+                        </div>
+                      ) : hasProgress ? (
+                        <div className="px-2 py-1 bg-orange-500 text-white text-[8px] font-black uppercase tracking-tighter shadow-lg rounded-[1px] flex items-center gap-1">
+                          <ArrowPathIcon className="h-2 w-2 animate-spin-slow" />
+                          In Progress
+                        </div>
+                      ) : null}
+                    </div>
 
                     <div className="absolute inset-0 z-30 pointer-events-none">
                       <div className="absolute top-3 left-3 flex items-center gap-2 pointer-events-auto">
@@ -170,12 +194,11 @@ function SearchContent() {
                   </div>
 
                   <div className="px-1">
-                    {/* Media titel nu in normale letters */}
                     <h2 className="text-sm font-bold text-zinc-100 truncate group-hover:text-[#3b82f6] transition-colors tracking-tight">
                       {item.title || item.name}
                     </h2>
                     <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mt-0.5">
-                      {item.media_type === 'tv' ? 'Series' : 'Movie'} • {(item.release_date || item.first_air_date)?.split('-')[0]}
+                      {mediaType === 'tv' ? 'Series' : 'Movie'} • {(item.release_date || item.first_air_date)?.split('-')[0]}
                     </p>
                   </div>
                 </Link>
@@ -191,61 +214,6 @@ function SearchContent() {
       </div>
     </main>
   );
-}
-
-function ArchiveStatus({ item, isWatched }: { item: any, isWatched: boolean }) {
-  const [inProgress, setInProgress] = useState(false);
-
-  useEffect(() => {
-    if (isWatched) {
-      setInProgress(false);
-      return;
-    }
-
-    const type = item.media_type;
-    const storageKey = type === 'tv' ? `progress_tv_${item.id}` : `progress_movie_${item.id}`;
-    const watchedEpisodesKey = `watched_tv_${item.id}`;
-    
-    const savedProgress = localStorage.getItem(storageKey);
-    const savedEpisodes = localStorage.getItem(watchedEpisodesKey);
-    
-    let hasProgress = false;
-    
-    if (savedProgress) {
-      const data = JSON.parse(savedProgress);
-      hasProgress = Array.isArray(data) ? data.length > 0 : data === true;
-    }
-    
-    if (!hasProgress && type === 'tv' && savedEpisodes) {
-      const episodes = JSON.parse(savedEpisodes);
-      hasProgress = episodes.length > 0;
-    }
-
-    setInProgress(hasProgress);
-  }, [item.id, item.media_type, isWatched]);
-
-  if (isWatched) {
-    return (
-      <div className="absolute bottom-3 left-3 z-30">
-        <div className="px-2 py-1 bg-[#10b981] text-white text-[8px] font-black uppercase tracking-tighter shadow-lg rounded-[1px]">
-          Completed
-        </div>
-      </div>
-    );
-  }
-
-  if (inProgress) {
-    return (
-      <div className="absolute bottom-3 left-3 z-30">
-        <div className="px-2 py-1 bg-orange-500 text-white text-[8px] font-black uppercase tracking-tighter shadow-lg rounded-[1px] flex items-center gap-1">
-          <ArrowPathIcon className="h-2 w-2 animate-spin-slow" />
-          In Progress
-        </div>
-      </div>
-    );
-  }
-
-  return null;
 }
 
 function FilterBtn({ active, label, onClick }: { active: boolean, label: string, onClick: () => void }) {
