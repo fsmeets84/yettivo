@@ -1,7 +1,7 @@
 "use client";
 
 import { useWatchlist } from "@/context/WatchlistContext";
-import { useAuth } from "@/context/AuthContext";
+import { useSession } from "next-auth/react"; // Gebruik NextAuth
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -18,18 +18,29 @@ import { EyeIcon as EyeSolid } from "@heroicons/react/24/solid";
 
 export default function WatchlistPage() {
   const { watchlist, removeFromWatchlist, isMovieWatched, toggleWatched } = useWatchlist();
-  const { isLoggedIn } = useAuth();
+  const { status } = useSession(); // Status checken via NextAuth
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
 
+  const isLoggedIn = status === "authenticated";
+
   useEffect(() => {
     setMounted(true);
-    if (mounted && !isLoggedIn) {
-      router.push("/login");
+    if (status === "unauthenticated") {
+      router.push("/auth/signin");
     }
-  }, [isLoggedIn, router, mounted]);
+  }, [status, router]);
 
-  if (!mounted || !isLoggedIn) return <div className="min-h-screen bg-[#0a0a0c]" />;
+  // Voorkom hydration mismatches tijdens het laden van de sessie
+  if (!mounted || status === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0a0a0c]">
+        <div className="h-6 w-6 border-2 border-[#3b82f6]/20 border-t-[#3b82f6] rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!isLoggedIn) return null;
 
   return (
     <main className="min-h-screen bg-transparent pt-32 pb-20 relative overflow-hidden">
@@ -69,8 +80,9 @@ export default function WatchlistPage() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8">
             {watchlist.map((item) => {
-              const watched = item.type === 'movie' ? isMovieWatched(item.tmdbId) : false;
-              const hasProgress = item.type === 'tv' && item.watchedEpisodes && item.watchedEpisodes.length > 0;
+              // Voor zowel movies als tv checken we of de 'isWatched' boolean waar is
+              const watched = isMovieWatched(item.tmdbId);
+              const hasProgress = item.type === 'tv' && (item.watchedEpisodes?.length ?? 0) > 0;
 
               return (
                 <div key={`${item.type}-${item.tmdbId}`} className="group space-y-4">
@@ -97,14 +109,13 @@ export default function WatchlistPage() {
 
                     {/* Progress Badge */}
                     <div className="absolute bottom-3 left-3 z-30">
-                      {watched && (
+                      {watched ? (
                         <span className="px-2 py-1 bg-emerald-500 text-white text-[8px] font-black uppercase tracking-tighter rounded-[1px]">Watched</span>
-                      )}
-                      {hasProgress && !watched && (
-                        <span className="px-2 py-1 bg-[#3b82f6] text-white text-[8px] font-black uppercase tracking-tighter rounded-[1px] flex items-center gap-1">
-                          <PlayIcon className="h-2 w-2" /> In Progress
+                      ) : hasProgress ? (
+                        <span className="px-2 py-1 bg-orange-500 text-white text-[8px] font-black uppercase tracking-tighter rounded-[1px] flex items-center gap-1 shadow-lg">
+                          <PlayIcon className="h-2 w-2 fill-current" /> In Progress
                         </span>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* Action Buttons */}
@@ -117,6 +128,7 @@ export default function WatchlistPage() {
                         <TrashIcon className="h-4 w-4" />
                       </button>
                       
+                      {/* Alleen Movie kan direct getoggled worden vanuit hier, TV doen we via de detailpagina of de grote Mark Watched knop */}
                       {item.type === 'movie' && (
                         <button
                           onClick={() => toggleWatched(item.tmdbId)}

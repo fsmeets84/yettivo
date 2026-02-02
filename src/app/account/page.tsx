@@ -1,7 +1,7 @@
 "use client";
 
 import { useWatchlist } from "@/context/WatchlistContext";
-import { useAuth } from "@/context/AuthContext";
+import { useSession } from "next-auth/react"; // Gebruik NextAuth
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -12,23 +12,36 @@ import {
   FilmIcon, 
   TvIcon, 
   StarIcon,
-  ChevronRightIcon
+  ChevronRightIcon,
+  ArrowPathIcon
 } from "@heroicons/react/24/outline";
 
 export default function AccountPage() {
   const { watchlist } = useWatchlist();
-  const { isLoggedIn, user } = useAuth();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
 
+  const isLoggedIn = status === "authenticated";
+  const user = session?.user;
+
   useEffect(() => {
     setMounted(true);
-    if (mounted && !isLoggedIn) {
-      router.push("/login");
+    if (status === "unauthenticated") {
+      router.push("/auth/signin");
     }
-  }, [isLoggedIn, router, mounted]);
+  }, [status, router]);
 
-  if (!mounted || !isLoggedIn) return <div className="min-h-screen bg-[#0a0a0c]" />;
+  // Voorkom hydration mismatches
+  if (!mounted || status === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0a0a0c]">
+        <div className="h-6 w-6 border-2 border-[#3b82f6]/20 border-t-[#3b82f6] rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!isLoggedIn) return null;
 
   // Statistieken berekenen
   const totalItems = watchlist.length;
@@ -38,17 +51,16 @@ export default function AccountPage() {
     ? (watchlist.reduce((acc, item) => acc + (item.voteAverage || 0), 0) / totalItems).toFixed(1)
     : "0.0";
 
-  // Sorteren op meest recent toegevoegd (van nieuw naar oud)
+  // Sorteren op meest recent toegevoegd
   const sortedWatchlist = [...watchlist].sort((a, b) => 
-    new Date(b.addedAt || (b as any).createdAt).getTime() - 
-    new Date(a.addedAt || (a as any).createdAt).getTime()
+    new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()
   );
 
   const recentAdditions = sortedWatchlist.slice(0, 5);
   
-  // Series met voortgang (laatste 3 actieve series)
-  const seriesWithProgress = sortedWatchlist
-    .filter(i => i.type === 'tv')
+  // Series met voortgang (items die niet volledig "watched" zijn maar wel episodes hebben)
+  const seriesWithProgress = watchlist
+    .filter(i => i.type === 'tv' && (i.watchedEpisodes?.length ?? 0) > 0 && !i.isWatched)
     .slice(0, 3);
 
   return (
@@ -68,10 +80,10 @@ export default function AccountPage() {
             </div>
             <div>
               <h1 className="text-3xl font-bold text-white tracking-tight">
-                {user?.username || "User"}
+                {user?.name || "Archive Member"}
               </h1>
               <p className="text-[11px] font-bold text-zinc-500 mt-1 uppercase tracking-[0.2em]">
-                Signed in as — <span className="text-[#3b82f6]">{user?.email}</span>
+                Verified account — <span className="text-[#3b82f6]">{user?.email}</span>
               </p>
             </div>
           </div>
@@ -129,29 +141,32 @@ export default function AccountPage() {
               <h2 className="text-[11px] font-bold text-white tracking-widest uppercase px-1">Active series progress</h2>
               <div className="grid gap-3">
                 {seriesWithProgress.length > 0 ? seriesWithProgress.map(series => {
-                  // Bereken voortgang (fictief voorbeeld: aantal watched episodes)
                   const episodesCount = series.watchedEpisodes?.length || 0;
-                  const progressWidth = Math.min((episodesCount / 10) * 100, 100); // 10 episodes als placeholder voor 100%
+                  // Subtiele progress bar (bijv. gebaseerd op 12 episodes gemiddeld)
+                  const progressWidth = Math.min((episodesCount / 12) * 100, 100);
 
                   return (
                     <Link 
                       key={series.tmdbId} 
                       href={`/tv/${series.tmdbId}`}
-                      className="p-4 rounded-sm bg-white/[0.03] border border-white/10 backdrop-blur-xl flex items-center gap-6 hover:bg-white/[0.06] transition-all border-l-2 border-l-[#3b82f6] group"
+                      className="p-4 rounded-sm bg-white/[0.03] border border-white/10 backdrop-blur-xl flex items-center gap-6 hover:bg-white/[0.06] transition-all border-l-2 border-l-orange-500/50 group"
                     >
                       <div className="h-12 w-8 relative rounded-sm overflow-hidden flex-shrink-0">
                         <Image src={`https://image.tmdb.org/t/p/w92${series.posterPath}`} alt="" fill className="object-cover" />
                       </div>
                       <div className="flex-1">
                          <div className="flex justify-between items-end mb-2">
-                           <p className="text-xs font-bold text-white group-hover:text-[#3b82f6] transition-colors">{series.title}</p>
+                           <div className="flex items-center gap-2">
+                             <ArrowPathIcon className="h-3 w-3 text-orange-500 animate-spin-slow" />
+                             <p className="text-xs font-bold text-white group-hover:text-[#3b82f6] transition-colors">{series.title}</p>
+                           </div>
                            <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-tighter">
-                             {episodesCount} Episodes watched
+                             {episodesCount} Episodes archived
                            </span>
                          </div>
                          <div className="h-1 w-full bg-white/5 rounded-none overflow-hidden">
                             <div 
-                              className="h-full bg-[#3b82f6] transition-all duration-1000 shadow-[0_0_15px_rgba(59,130,246,0.4)]" 
+                              className="h-full bg-orange-500 transition-all duration-1000 shadow-[0_0_15px_rgba(249,115,22,0.4)]" 
                               style={{ width: `${progressWidth || 5}%` }} 
                             />
                          </div>

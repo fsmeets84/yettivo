@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useSession } from "next-auth/react"; // Gebruik NextAuth i.p.v. je oude AuthContext
+import { useSession } from "next-auth/react";
 import { useWatchlist } from "@/context/WatchlistContext";
 import { BookmarkIcon } from "@heroicons/react/24/outline";
 import { BookmarkIcon as BookmarkSolid } from "@heroicons/react/24/solid";
