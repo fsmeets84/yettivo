@@ -1,64 +1,98 @@
-const API_KEY = process.env.TMDB_API_KEY;
-const BASE_URL = 'https://api.themoviedb.org/3';
+const TMDB_API_KEY = process.env.TMDB_API_KEY;
+const BASE_URL = "https://api.themoviedb.org/3";
 
-// --- MOVIES ---
-
-export async function searchMovies(query: string) {
-  const res = await fetch(
-    `${BASE_URL}/search/movie?api_key=${API_KEY}&query=${encodeURIComponent(query)}&language=en-US`
-  );
-  
-  if (!res.ok) throw new Error('Failed to fetch movies');
-  const data = await res.json();
-  return data.results;
+export interface Movie {
+  id: number;
+  title: string;
+  overview: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  release_date: string;
+  vote_average: number;
+  runtime: number;
+  status: string;
+  budget: number;
+  revenue: number;
+  genres: { id: number; name: string }[];
+  production_companies: { id: number; name: string; logo_path: string | null }[];
+  original_language: string;
+  popularity: number;
 }
 
+export interface TvShow {
+  id: number;
+  name: string;
+  overview: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  first_air_date: string;
+  last_air_date: string;
+  vote_average: number;
+  number_of_seasons: number;
+  number_of_episodes: number;
+  status: string;
+  in_production: boolean;
+  genres: { id: number; name: string }[];
+  networks: { id: number; name: string; logo_path: string | null }[];
+  origin_country: string[];
+  original_language: string;
+  episode_run_time: number[];
+  // Voeg deze regel toe:
+  seasons: {
+    id: number;
+    name: string;
+    overview: string;
+    poster_path: string | null;
+    season_number: number;
+    episode_count: number;
+    air_date: string;
+  }[];
+}
+// Helper for fetching from TMDB
+async function fetchFromTMDB(endpoint: string, params: string = "") {
+  const url = `${BASE_URL}${endpoint}?api_key=${TMDB_API_KEY}&language=en-US${params}`;
+  const res = await fetch(url, { next: { revalidate: 3600 } }); // Cache for 1 hour
+  if (!res.ok) return null;
+  return res.json();
+}
+
+// Movies
 export async function getTrendingMovies() {
-  const res = await fetch(
-    `${BASE_URL}/trending/movie/week?api_key=${API_KEY}&language=en-US`
-  );
-  
-  if (!res.ok) throw new Error('Failed to fetch trending movies');
-  const data = await res.json();
-  return data.results;
+  const data = await fetchFromTMDB("/trending/movie/day");
+  return data?.results || [];
 }
 
-export async function getMovieById(id: string) {
-  const res = await fetch(
-    `${BASE_URL}/movie/${id}?api_key=${API_KEY}&language=en-US`
-  );
-
-  if (!res.ok) return null;
-  return res.json();
+export async function getMovieById(id: string): Promise<Movie | null> {
+  return fetchFromTMDB(`/movie/${id}`);
 }
 
-// --- TV SERIES ---
-
-export async function searchTvShows(query: string) {
-  const res = await fetch(
-    `${BASE_URL}/search/tv?api_key=${API_KEY}&query=${encodeURIComponent(query)}&language=en-US`
-  );
-  
-  if (!res.ok) throw new Error('Failed to fetch TV shows');
-  const data = await res.json();
-  return data.results;
+export async function getMovieVideos(id: string) {
+  const data = await fetchFromTMDB(`/movie/${id}/videos`);
+  return data?.results?.find((v: any) => v.type === "Trailer" && v.site === "YouTube") || data?.results?.[0];
 }
 
+// TV Shows
 export async function getTrendingTvShows() {
-  const res = await fetch(
-    `${BASE_URL}/trending/tv/week?api_key=${API_KEY}&language=en-US`
-  );
-  
-  if (!res.ok) throw new Error('Failed to fetch trending TV shows');
-  const data = await res.json();
-  return data.results;
+  const data = await fetchFromTMDB("/trending/tv/day");
+  return data?.results || [];
 }
 
-export async function getTvShowById(id: string) {
-  const res = await fetch(
-    `${BASE_URL}/tv/${id}?api_key=${API_KEY}&language=en-US`
-  );
+export async function getTvShowById(id: string): Promise<TvShow | null> {
+  return fetchFromTMDB(`/tv/${id}`);
+}
 
-  if (!res.ok) return null;
-  return res.json();
+export async function getTvVideos(id: string) {
+  const data = await fetchFromTMDB(`/tv/${id}/videos`);
+  return data?.results?.find((v: any) => v.type === "Trailer" && v.site === "YouTube") || data?.results?.[0];
+}
+
+export async function getSeasonDetails(tvId: string, seasonNumber: number) {
+  const data = await fetchFromTMDB(`/tv/${tvId}/season/${seasonNumber}`);
+  return data;
+}
+
+// Search
+export async function searchMulti(query: string) {
+  const data = await fetchFromTMDB("/search/multi", `&query=${encodeURIComponent(query)}`);
+  return data?.results || [];
 }

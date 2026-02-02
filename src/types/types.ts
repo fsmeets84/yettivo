@@ -6,17 +6,23 @@ export interface Movie {
   backdrop_path: string | null;
   release_date: string;
   vote_average: number;
-  // Optional: add media_type for mixed results later
-  media_type?: 'movie'; 
+  // Optional extra details
+  genres?: { id: number; name: string }[];
+  runtime?: number;
+  status?: string;
 }
 
-export interface TvShow {
+export interface TVShow {
   id: number;
-  name: string; // TV shows use 'name', not 'title'
+  name: string;
   overview: string;
   poster_path: string | null;
   backdrop_path: string | null;
-  first_air_date: string; // TV shows use 'first_air_date'
+  first_air_date: string;
   vote_average: number;
-  media_type?: 'tv';
+  // Optional extra details
+  number_of_seasons?: number;
+  status?: string;
+  genres?: { id: number; name: string }[];
+  networks?: { name: string }[];
 }

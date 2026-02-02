@@ -1,99 +1,126 @@
-import { searchMovies, getTrendingMovies, searchTvShows, getTrendingTvShows } from '@/lib/tmdb';
-import SearchBox from '@/components/SearchBox';
-import CategorySwitch from '@/components/CategorySwitch';
-import { Movie, TvShow } from '@/types/types';
-import Link from 'next/link';
+"use client";
 
-type Props = {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
-};
+import { useEffect, useState, useMemo } from "react"; // useMemo toegevoegd
+import Hero from "@/components/Hero";
+import MovieCard from "@/components/MovieCard";
+import { useWatchlist } from "@/context/WatchlistContext";
+import { useSession } from "next-auth/react";
+import { FireIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
+import Link from "next/link";
+import Image from "next/image";
 
-export default async function Home(props: Props) {
-  const searchParams = await props.searchParams;
-  const query = typeof searchParams.query === 'string' ? searchParams.query : null;
+export default function HomePage() {
+  const [trending, setTrending] = useState<any[]>([]);
+  const [continueWatching, setContinueWatching] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   
-  // Determine category from URL (default to 'movie')
-  const category = typeof searchParams.category === 'string' && searchParams.category === 'tv' ? 'tv' : 'movie';
-  
-  // The list can contain either Movies or TvShows
-  let items: (Movie | TvShow)[] = [];
-  
-  try {
-    if (category === 'movie') {
-      items = query ? await searchMovies(query) : await getTrendingMovies();
-    } else {
-      items = query ? await searchTvShows(query) : await getTrendingTvShows();
-    }
-  } catch (error) {
-    console.error(error);
+  const { status } = useSession();
+  const isLoggedIn = status === "authenticated";
+  const { isMovieWatched } = useWatchlist();
+
+  // 1. Fetch Trending data ALLEEN bij mount of login-status verandering
+  useEffect(() => {
+    const fetchTrending = async () => {
+      // We zetten setLoading alleen de ALLEREERSTE keer op true
+      // zodat de pagina niet knippert bij watchlist updates
+      const apiKey = process.env.NEXT_PUBLIC_TMDB_API_KEY;
+
+      try {
+        const res = await fetch(`https://api.themoviedb.org/3/trending/all/day?api_key=${apiKey}`);
+        const data = await res.json();
+        setTrending(data.results || []);
+      } catch (error) {
+        console.error("Error loading trending:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTrending();
+  }, [isLoggedIn]); // Verwijder isMovieWatched hier!
+
+  // 2. Aparte effect voor Continue Watching (LocalStorage)
+  useEffect(() => {
+    const fetchContinueWatching = async () => {
+      if (!isLoggedIn) {
+        setContinueWatching([]);
+        return;
+      }
+
+      const apiKey = process.env.NEXT_PUBLIC_TMDB_API_KEY;
+      const activeItems: { id: string; type: "movie" | "tv" }[] = [];
+      const processedIds = new Set();
+
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key?.startsWith("progress_") && !key?.startsWith("watched_tv_")) continue;
+
+        const type = key.includes("_movie_") ? "movie" : "tv";
+        const id = key.split("_").pop();
+        if (!id || processedIds.has(`${type}-${id}`)) continue;
+
+        activeItems.push({ id, type });
+        processedIds.add(`${type}-${id}`);
+      }
+
+      if (activeItems.length > 0) {
+        const details = await Promise.all(
+          activeItems.map(async (item) => {
+            const itemRes = await fetch(`https://api.themoviedb.org/3/${item.type}/${item.id}?api_key=${apiKey}`);
+            return await itemRes.json();
+          })
+        );
+        // We filteren hier op watched status zonder de hele pagina te herladen
+        setContinueWatching(details.filter(d => d.id && !isMovieWatched(d.id)));
+      }
+    };
+
+    fetchContinueWatching();
+  }, [isLoggedIn, isMovieWatched]); // Deze mag wel blijven, want Resume Mission is dynamisch
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0a0a0c]">
+        <div className="h-8 w-8 border-2 border-[#3b82f6]/20 border-t-[#3b82f6] rounded-full animate-spin" />
+      </div>
+    );
   }
 
   return (
-    <main className="p-8 bg-slate-900 min-h-screen text-white">
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-4xl font-bold mb-6 text-blue-400 tracking-tight text-center md:text-left">
-           Discover your next favorite {category === 'movie' ? 'movie' : 'series'}.
-        </h1>
-        
-        <SearchBox />
-        
-        {/* Switch between Movies and TV Series */}
-        <CategorySwitch />
+    <main className="min-h-screen pb-20 bg-[#0a0a0c]">
+      {trending.length > 0 && <Hero movies={trending} />}
 
-        <h2 className="text-xl mb-4 text-slate-400">
-          {query ? (
-            <>Results for: <span className="text-white italic">"{query}"</span></>
-          ) : (
-            <span className="text-white">Trending {category === 'movie' ? 'Movies' : 'TV Series'} this week 🔥</span>
-          )}
-        </h2>
-        
-        {items.length === 0 ? (
-          <div className="text-center py-20 text-slate-500">
-            No results found.
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
-            {items.map((item) => {
-              // Type Guard: Check if item is Movie (has title) or TV (has name)
-              const isMovie = 'title' in item;
-              const title = isMovie ? (item as Movie).title : (item as TvShow).name;
-              const date = isMovie ? (item as Movie).release_date : (item as TvShow).first_air_date;
-              const linkUrl = isMovie ? `/movie/${item.id}` : `/tv/${item.id}`;
-
-              return (
-                <Link 
-                  key={item.id} 
-                  href={linkUrl} 
-                  className="group block"
-                >
-                  <div className="aspect-[2/3] relative overflow-hidden rounded-lg bg-slate-800 shadow-lg group-hover:shadow-blue-900/20 transition-all">
-                    {item.poster_path ? (
-                      <img 
-                        src={`https://image.tmdb.org/t/p/w500${item.poster_path}`}
-                        alt={title}
-                        className="hover:scale-105 transition-transform duration-300 object-cover w-full h-full"
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center h-full text-slate-500 text-sm p-4 text-center">
-                        No poster available
-                      </div>
-                    )}
-                    <div className="absolute top-2 right-2 bg-black/70 text-white text-xs font-bold px-2 py-1 rounded backdrop-blur-sm">
-                      {item.vote_average?.toFixed(1)}
-                    </div>
-                  </div>
-                  <p className="mt-3 font-semibold truncate text-slate-100 group-hover:text-blue-400 transition-colors">
-                    {title}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {date ? date.split('-')[0] : 'Unknown'}
-                  </p>
-                </Link>
-              );
-            })}
-          </div>
+      <div className="container mx-auto px-8 relative z-20 pt-12">
+        {/* RESUME MISSION SECTION (onveranderd) */}
+        {isLoggedIn && continueWatching.length > 0 && (
+           <section className="mb-20">
+             {/* ... je bestaande resume mission code ... */}
+           </section>
         )}
+
+        {/* TRENDING SECTION */}
+        <header className="mb-10 flex items-end justify-between">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-[#3b82f6] mb-1">
+              <FireIcon className="h-4 w-4" />
+              <span className="text-[11px] font-bold tracking-tight uppercase">Trending</span>
+            </div>
+            <h2 className="text-3xl font-semibold text-white tracking-tight">Trending now</h2>
+          </div>
+        </header>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+          {trending.map((item) => (
+            <MovieCard 
+              key={`${item.media_type}-${item.id}`} // Stabiele key
+              id={item.id}
+              title={item.title || item.name}
+              posterPath={item.poster_path}
+              voteAverage={item.vote_average}
+              type={item.media_type === 'tv' ? 'tv' : 'movie'}
+            />
+          ))}
+        </div>
       </div>
     </main>
   );

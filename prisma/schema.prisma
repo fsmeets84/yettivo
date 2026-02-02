@@ -1,14 +1,83 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token      String? @db.Text
+  access_token       String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  username      String?   @unique
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  accounts      Account[]
+  sessions      Session[]
+  
+  // Link to the watchlist
+  watchlist     WatchlistItem[]
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// --- UPDATED MODEL: WATCHLIST ---
+model WatchlistItem {
+  id              String   @id @default(cuid())
+  userId          String
+  tmdbId          String   // ID from TMDB
+  type            String   // "movie" or "tv"
+  title           String   
+  posterPath      String?  
+  voteAverage     Float?   
+  createdAt       DateTime @default(now())
+
+  // --- PROGRESS & LIST LOGIC ---
+  isWatched       Boolean  @default(false)      // Used for movies
+  watchedEpisodes String[] @default([])         // Array of "season-episode" strings
+  inWatchlist     Boolean  @default(true)       // Determines if it shows up in "My Watchlist"
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Prevent duplicate entries
+  @@unique([userId, tmdbId, type])
 }

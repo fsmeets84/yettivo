@@ -1,30 +1,22 @@
 export default function Loading() {
   return (
-    <main className="p-8 bg-slate-900 min-h-screen text-white">
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-4xl font-bold mb-6 text-blue-400 tracking-tight">Yettivo</h1>
+    /* bg-transparent zorgt ervoor dat de globale glows uit globals.css 
+       direct zichtbaar zijn terwijl de content laadt */
+    <div className="min-h-screen bg-transparent flex flex-col items-center justify-center gap-4">
+      
+      {/* Animated Spinner with Studio Blue glow */}
+      <div className="relative">
+        {/* Outer static ring */}
+        <div className="h-12 w-12 border-4 border-white/[0.03] rounded-full" />
         
-        {/* SearchBox Skeleton */}
-        <div className="mb-8 relative max-w-lg mx-auto h-14 bg-slate-800 rounded-full animate-pulse" />
-
-        {/* Title Skeleton */}
-        <div className="h-8 w-48 bg-slate-800 rounded mb-4 animate-pulse" />
-        
-        {/* Movies Grid Skeleton */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
-          {/* We maken een array van 10 items om 10 lege kaarten te tonen */}
-          {[...Array(10)].map((_, i) => (
-            <div key={i} className="animate-pulse">
-              {/* Poster placeholder */}
-              <div className="aspect-[2/3] bg-slate-800 rounded-lg mb-3" />
-              {/* Title placeholder */}
-              <div className="h-4 bg-slate-800 rounded w-3/4 mb-2" />
-              {/* Date placeholder */}
-              <div className="h-3 bg-slate-800 rounded w-1/4" />
-            </div>
-          ))}
-        </div>
+        {/* Inner spinning ring with neon glow */}
+        <div className="absolute inset-0 h-12 w-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin shadow-[0_0_20px_rgba(37,99,235,0.3)]" />
       </div>
-    </main>
+
+      {/* Subtle loading text */}
+      <p className="text-[10px] font-bold text-zinc-500 tracking-[0.2em] uppercase animate-pulse">
+        Accessing archive
+      </p>
+    </div>
   );
 }
