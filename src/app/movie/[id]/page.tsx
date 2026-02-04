@@ -28,7 +28,6 @@ export default function MovieDetailPage() {
   const [trailer, setTrailer] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isTrailerOpen, setIsTrailerOpen] = useState(false);
-  const [isInProgress, setIsInProgress] = useState(false);
   
   const { 
     isInWatchlist, 
@@ -36,10 +35,14 @@ export default function MovieDetailPage() {
     removeFromWatchlist, 
     isMovieWatched, 
     toggleWatched,
-    watchlist
+    watchlist,
+    setMovieInProgress 
   } = useWatchlist();
 
   const movieInDb = watchlist.find(item => String(item.tmdbId) === String(id));
+  const watched = isMovieWatched(Number(id));
+  const inWatchlist = isInWatchlist(Number(id));
+  const isInProgress = movieInDb?.inProgress || false;
 
   useEffect(() => {
     const fetchMovieData = async () => {
@@ -58,10 +61,6 @@ export default function MovieDetailPage() {
         const video = data.videos?.results.find((v: any) => v.type === "Trailer" && v.site === "YouTube");
         if (video) setTrailer(video.key);
 
-        const savedProgress = localStorage.getItem(`progress_movie_${id}`);
-        const hasDbEntry = !!movieInDb && !movieInDb.isWatched && !movieInDb.inWatchlist;
-        setIsInProgress(hasDbEntry || JSON.parse(savedProgress || "false"));
-
       } catch (error) { 
         console.error("Error fetching movie data:", error); 
       } finally { 
@@ -69,39 +68,39 @@ export default function MovieDetailPage() {
       }
     };
     fetchMovieData();
-  }, [id, movieInDb]);
+  }, [id]);
 
-  const watched = isMovieWatched(Number(id));
-  const inWatchlist = isInWatchlist(Number(id));
+  // VERBETERDE FUNCTIE: Toggle de watching status (starten of stoppen)
+  const handleToggleWatching = async () => {
+    if (watched || !isLoggedIn || !movie) return;
 
-  const handleToggleInProgress = async () => {
-    if (watched || !isLoggedIn) return;
-    const newState = !isInProgress;
-    setIsInProgress(newState);
-    localStorage.setItem(`progress_movie_${id}`, JSON.stringify(newState));
+    try {
+      // 1. Voeg toe aan watchlist als hij er nog niet in staat
+      if (!inWatchlist) {
+        await addToWatchlist({ 
+          tmdbId: movie.id, 
+          title: movie.title, 
+          posterPath: movie.poster_path, 
+          type: 'movie', 
+          voteAverage: movie.vote_average 
+        });
+      }
 
-    if (newState && !movieInDb) {
-      await toggleWatched(Number(id), { 
-        title: movie.title, 
-        posterPath: movie.poster_path, 
-        voteAverage: movie.vote_average 
-      });
+      // 2. Toggle de status: als het true was naar false, en vice versa
+      await setMovieInProgress(Number(id), !isInProgress);
+    } catch (error) {
+      console.error("Failed to toggle watching status:", error);
     }
   };
 
   const handleToggleWatched = async () => {
-    if (!isLoggedIn || !id) return;
+    if (!isLoggedIn || !id || !movie) return;
     
     await toggleWatched(Number(id), { 
       title: movie.title, 
       posterPath: movie.poster_path, 
       voteAverage: movie.vote_average 
     });
-
-    if (!watched) {
-      setIsInProgress(false);
-      localStorage.setItem(`progress_movie_${id}`, JSON.stringify(false));
-    }
   };
 
   const handleWatchlistAction = async () => {
@@ -135,7 +134,6 @@ export default function MovieDetailPage() {
         />
       )}
 
-      {/* Hero Section */}
       <section className="relative h-[85vh] w-full">
         <div 
           className="absolute inset-0 z-0"
@@ -164,7 +162,6 @@ export default function MovieDetailPage() {
       <div className="container mx-auto px-8 -mt-96 relative z-10 pb-20">
         <div className="flex flex-col lg:flex-row gap-16 items-start">
           
-          {/* Poster Area */}
           <div className="w-72 flex-shrink-0 mx-auto lg:mx-0">
             <div className="aspect-[2/3] relative overflow-hidden shadow-2xl rounded-sm border border-white/10 group bg-zinc-900">
               {movie.poster_path ? (
@@ -180,7 +177,6 @@ export default function MovieDetailPage() {
             </div>
           </div>
 
-          {/* Content Area */}
           <div className="flex-1 space-y-10 pt-8">
             <div className="space-y-6">
               <div className="flex items-center gap-4">
@@ -211,7 +207,6 @@ export default function MovieDetailPage() {
               )}
             </div>
 
-            {/* Actions */}
             <div className="flex flex-wrap items-center gap-4">
               {isLoggedIn ? (
                 <>
@@ -228,17 +223,21 @@ export default function MovieDetailPage() {
                   </button>
 
                   <button 
-                    onClick={handleToggleInProgress}
+                    onClick={handleToggleWatching}
                     disabled={watched}
                     className={`flex items-center justify-center gap-3 px-8 py-4 rounded-sm border text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-500 ${
                       watched ? "opacity-30 cursor-not-allowed border-white/5 bg-white/5 text-zinc-600" :
                       isInProgress 
-                      ? "bg-orange-500/10 border-orange-500/40 text-orange-500" 
+                      ? "bg-orange-500 border-orange-400 text-white shadow-[0_0_20px_rgba(249,115,22,0.4)]" 
                       : "bg-white/5 border border-white/10 text-zinc-400 hover:text-orange-500 hover:border-orange-500/30"
                     }`}
                   >
-                    <ArrowPathIcon className={`h-4 w-4 ${isInProgress && !watched ? "animate-spin-slow" : ""}`} />
-                    {isInProgress ? "In Progress" : "Mark in Progress"}
+                    {isInProgress ? (
+                      <ArrowPathIcon className="h-4 w-4 animate-spin-slow" />
+                    ) : (
+                      <PlayIcon className="h-4 w-4 fill-current" />
+                    )}
+                    {isInProgress ? "Currently Watching" : "Start Watching"}
                   </button>
 
                   <button 
@@ -271,13 +270,11 @@ export default function MovieDetailPage() {
               )}
             </div>
 
-            {/* Synopsis */}
             <div className="space-y-4 pt-4 max-w-3xl border-b border-white/5 pb-10">
               <h2 className="text-[10px] font-black text-[#3b82f6] tracking-[0.3em] uppercase opacity-60">SYNOPSIS</h2>
               <p className="text-lg leading-relaxed text-zinc-300 font-medium tracking-tight">{movie.overview}</p>
             </div>
 
-            {/* Meta Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 pt-10 border-t border-white/5">
               <MetaItem label="Release Year" value={movie.release_date ? new Date(movie.release_date).getFullYear() : "N/A"} icon={<CalendarIcon className="h-4 w-4" />} />
               <MetaItem label="Runtime" value={`${movie.runtime || 0}m`} icon={<ClockIcon className="h-4 w-4" />} />

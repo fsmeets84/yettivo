@@ -24,12 +24,10 @@ export default function TvShowDetailPage() {
   const { status } = useSession();
   const isLoggedIn = status === "authenticated";
 
-  // --- States voor afleveringen ---
   const [show, setShow] = useState<any>(null);
   const [activeSeason, setActiveSeason] = useState(1);
   const [episodes, setEpisodes] = useState<any[]>([]);
   const [episodesLoading, setEpisodesLoading] = useState(false);
-  // --------------------------------
 
   const [trailer, setTrailer] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,15 +38,16 @@ export default function TvShowDetailPage() {
     isMovieWatched, 
     toggleAllEpisodesWatched,
     toggleEpisodeWatched,
-    toggleSeasonWatched, // Nieuwe functie toegevoegd
+    toggleSeasonWatched,
+    setMovieInProgress, 
     watchlist 
   } = useWatchlist();
 
-  const showInDb = watchlist.find(item => String(item.tmdbId) === String(id));
+  const showInDb = watchlist.find(item => String(item.tmdbId) === String(id) && item.type === 'tv');
   const watched = isMovieWatched(Number(id));
-  const hasProgress = (showInDb?.watchedEpisodes?.length ?? 0) > 0;
+  
+  const isInProgress = showInDb?.inProgress || (showInDb?.watchedEpisodes?.length ?? 0) > 0;
 
-  // Fetch basis TV data
   useEffect(() => {
     const fetchShowData = async () => {
       if (!id) return;
@@ -59,13 +58,10 @@ export default function TvShowDetailPage() {
           `https://api.themoviedb.org/3/tv/${id}?api_key=${apiKey}&append_to_response=videos,images&include_image_language=en,null`
         );
         const data = await res.json();
-        
         const logo = data.images?.logos?.find((l: any) => l.file_path);
         setShow({ ...data, logoPath: logo?.file_path });
-
         const video = data.videos?.results.find((v: any) => v.type === "Trailer" && v.site === "YouTube");
         if (video) setTrailer(video.key);
-
       } catch (error) { 
         console.error("Error fetching TV data:", error); 
       } finally { 
@@ -75,7 +71,6 @@ export default function TvShowDetailPage() {
     fetchShowData();
   }, [id]);
 
-  // Fetch episodes wanneer het seizoen verandert
   useEffect(() => {
     const fetchEpisodes = async () => {
       if (!id || !show) return;
@@ -99,7 +94,6 @@ export default function TvShowDetailPage() {
   const handleWatchedToggle = async () => {
     setIsConfirmModalOpen(false);
     if (!show) return;
-
     try {
       if (watched) {
         await toggleAllEpisodesWatched(Number(id), { 
@@ -120,18 +114,44 @@ export default function TvShowDetailPage() {
     }
   };
 
-  // --- HERSTELD: Functie voor Bulk Seizoen Toggle ---
+  const handleEpisodeClick = async (seasonNum: number, epNum: number) => {
+    if (!isLoggedIn || !show) return;
+    
+    const epKey = `${seasonNum}-${epNum}`;
+    const isCurrentlyMarked = showInDb?.watchedEpisodes?.includes(epKey);
+    const currentCount = showInDb?.watchedEpisodes?.length ?? 0;
+
+    try {
+      // 1. Toggle direct in context
+      await toggleEpisodeWatched(Number(id), seasonNum, epNum);
+      
+      // 2. Bepaal inProgress status
+      if (!isCurrentlyMarked && currentCount === 0) {
+        await setMovieInProgress(Number(id), true, show.name, show.poster_path, 'tv');
+      } else if (isCurrentlyMarked && currentCount === 1) {
+        await setMovieInProgress(Number(id), false, show.name, show.poster_path, 'tv');
+      }
+    } catch (error) {
+      console.error("Error updating episode:", error);
+    }
+  };
+
   const handleSeasonWatchedToggle = async () => {
     if (!show || !episodes.length) return;
-
     const seasonNum = activeSeason;
-    // Check of alle geladen afleveringen van dit seizoen gemarkeerd zijn in de DB
     const isSeasonFullyWatched = episodes.every(ep => 
       showInDb?.watchedEpisodes?.includes(`${seasonNum}-${ep.episode_number}`)
     );
 
-    // Roep de nieuwe bulk functie aan: als het al vol was -> leegmaken, anders -> vullen
-    await toggleSeasonWatched(Number(id), seasonNum, episodes, !isSeasonFullyWatched);
+    try {
+      await toggleSeasonWatched(Number(id), seasonNum, episodes, !isSeasonFullyWatched);
+      
+      if (!isSeasonFullyWatched && !showInDb?.inProgress) {
+        await setMovieInProgress(Number(id), true, show.name, show.poster_path, 'tv');
+      }
+    } catch (error) {
+      console.error("Error updating season:", error);
+    }
   };
 
   if (loading || !show) return (
@@ -154,7 +174,7 @@ export default function TvShowDetailPage() {
         isOpen={isConfirmModalOpen}
         title={watched ? "Mark as Unwatched" : "Mark as Watched"}
         message={watched 
-          ? `Do you want to remove "${show.name}" from your watched records? This will reset all episode progress.` 
+          ? `Do you want to remove "${show.name}" from your watched records?` 
           : `Do you want to mark all episodes of "${show.name}" as watched?`}
         onConfirm={handleWatchedToggle}
         onCancel={() => setIsConfirmModalOpen(false)}
@@ -238,12 +258,12 @@ export default function TvShowDetailPage() {
                   />
 
                   <div className={`flex items-center justify-center gap-3 px-8 py-4 rounded-sm border text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-500 min-w-[160px] ${
-                    hasProgress && !watched 
-                    ? "bg-orange-500/10 border-orange-500/40 text-orange-500" 
+                    isInProgress && !watched 
+                    ? "bg-orange-500 border-orange-400 text-white shadow-[0_0_20px_rgba(249,115,22,0.4)]" 
                     : "bg-white/5 border border-white/10 text-zinc-600 opacity-50"
                   }`}>
-                    <ArrowPathIcon className={`h-4 w-4 ${hasProgress && !watched ? "animate-spin-slow" : ""}`} />
-                    {hasProgress && !watched ? "In Progress" : "No active progress"}
+                    <ArrowPathIcon className={`h-4 w-4 ${isInProgress && !watched ? "animate-spin-slow" : ""}`} />
+                    {isInProgress && !watched ? "Currently Watching" : "No active progress"}
                   </div>
 
                   <MarkWatchedButton 
@@ -268,44 +288,18 @@ export default function TvShowDetailPage() {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 pt-10 border-t border-white/5">
-              <MetaItem 
-                label="First Air Date" 
-                value={show.first_air_date ? new Date(show.first_air_date).getFullYear() : "N/A"} 
-                icon={<CalendarIcon className="h-4 w-4" />} 
-              />
-              <MetaItem 
-                label="Seasons" 
-                value={show.number_of_seasons} 
-                icon={<TvIcon className="h-4 w-4" />} 
-              />
-              <MetaItem 
-                label="Episodes" 
-                value={show.number_of_episodes} 
-                icon={<InformationCircleIcon className="h-4 w-4" />} 
-              />
-              <MetaItem 
-                label="Status" 
-                value={show.status} 
-                icon={<StarIcon className="h-4 w-4" />} 
-              />
+              <MetaItem label="First Air Date" value={show.first_air_date ? new Date(show.first_air_date).getFullYear() : "N/A"} icon={<CalendarIcon className="h-4 w-4" />} />
+              <MetaItem label="Seasons" value={show.number_of_seasons} icon={<TvIcon className="h-4 w-4" />} />
+              <MetaItem label="Episodes" value={show.number_of_episodes} icon={<InformationCircleIcon className="h-4 w-4" />} />
+              <MetaItem label="Status" value={show.status} icon={<StarIcon className="h-4 w-4" />} />
             </div>
 
             <div className="pt-8 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-[10px] font-black text-[#3b82f6] tracking-[0.3em] uppercase opacity-60">Select Season</h2>
-                {watched && (
-                  <span className="text-[9px] font-black text-[#10b981] uppercase tracking-widest bg-[#10b981]/10 px-2 py-1 rounded-sm border border-[#10b981]/20">
-                    Entire Series Watched
-                  </span>
-                )}
-              </div>
-              
               <div className="flex flex-wrap gap-3">
                 {show.seasons?.filter((s: any) => s.season_number > 0).map((season: any) => {
                   const watchedInThisSeason = showInDb?.watchedEpisodes?.filter((ep: string) => 
                     ep.startsWith(`${season.season_number}-`)
                   ).length || 0;
-                  
                   const isSeasonFullyWatched = watchedInThisSeason >= season.episode_count;
                   const isSeasonInProgress = watchedInThisSeason > 0 && !isSeasonFullyWatched;
 
@@ -326,16 +320,9 @@ export default function TvShowDetailPage() {
                       ) : isSeasonInProgress ? (
                         <ArrowPathIcon className={`h-3 w-3 animate-spin-slow ${activeSeason === season.season_number ? "text-white" : "text-orange-500"}`} />
                       ) : null}
-
                       Season {season.season_number}
-                      
                       {watchedInThisSeason > 0 && (
-                        <div 
-                          className={`absolute bottom-0 left-0 h-[2px] transition-all duration-500 ${
-                            isSeasonFullyWatched ? "bg-[#10b981]" : "bg-orange-500"
-                          }`} 
-                          style={{ width: `${(watchedInThisSeason / season.episode_count) * 100}%` }} 
-                        />
+                        <div className={`absolute bottom-0 left-0 h-[2px] transition-all duration-500 ${isSeasonFullyWatched ? "bg-[#10b981]" : "bg-orange-500"}`} style={{ width: `${(watchedInThisSeason / season.episode_count) * 100}%` }} />
                       )}
                     </button>
                   );
@@ -345,20 +332,11 @@ export default function TvShowDetailPage() {
 
             <div className="pt-8 space-y-6">
               <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                <h2 className="text-[10px] font-black text-[#3b82f6] tracking-[0.3em] uppercase opacity-60">
-                  Episodes — Season {activeSeason}
-                </h2>
-                
+                <h2 className="text-[10px] font-black text-[#3b82f6] tracking-[0.3em] uppercase opacity-60">Episodes — Season {activeSeason}</h2>
                 {isLoggedIn && (
-                  <button 
-                    onClick={handleSeasonWatchedToggle}
-                    className="flex items-center gap-2 px-4 py-2 rounded-sm bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-zinc-400 hover:text-white hover:bg-[#3b82f6]/20 hover:border-[#3b82f6]/40 transition-all group"
-                  >
+                  <button onClick={handleSeasonWatchedToggle} className="flex items-center gap-2 px-4 py-2 rounded-sm bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-zinc-400 hover:text-white hover:bg-[#3b82f6]/20 hover:border-[#3b82f6]/40 transition-all group">
                     <CheckCircleIcon className="h-3.5 w-3.5 group-hover:text-[#3b82f6]" />
-                    {episodes.every(ep => showInDb?.watchedEpisodes?.includes(`${activeSeason}-${ep.episode_number}`)) 
-                      ? `Mark Season ${activeSeason} as Unwatched`
-                      : `Mark Season ${activeSeason} as Watched`
-                    }
+                    {episodes.every(ep => showInDb?.watchedEpisodes?.includes(`${activeSeason}-${ep.episode_number}`)) ? `Mark Season ${activeSeason} as Unwatched` : `Mark Season ${activeSeason} as Watched`}
                   </button>
                 )}
               </div>
@@ -381,7 +359,7 @@ export default function TvShowDetailPage() {
                         </div>
                         {isLoggedIn && (
                           <button 
-                            onClick={() => toggleEpisodeWatched(Number(id), activeSeason, ep.episode_number)} 
+                            onClick={() => handleEpisodeClick(activeSeason, ep.episode_number)} 
                             className={`p-3 rounded-sm transition-all ${isEpWatched ? "text-[#10b981] bg-[#10b981]/10 border border-[#10b981]/30" : "text-zinc-500 hover:text-white bg-white/5 border border-white/10"}`}
                           >
                             {isEpWatched ? <CheckSolid className="h-5 w-5" /> : <CheckCircleIcon className="h-5 w-5" />}
@@ -393,7 +371,6 @@ export default function TvShowDetailPage() {
                 )}
               </div>
             </div>
-
           </div> 
         </div>
       </div>

@@ -16,13 +16,13 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token      String? @db.Text
-  access_token       String? @db.Text
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
   expires_at        Int?
   token_type        String?
   scope             String?
   id_token          String? @db.Text
-  session_state      String?
+  session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -70,9 +70,11 @@ model WatchlistItem {
   posterPath      String?  
   voteAverage     Float?   
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt // Zorgt voor automatische tijdstempel bij elke wijziging
 
   // --- PROGRESS & LIST LOGIC ---
   isWatched       Boolean  @default(false)      // Used for movies
+  inProgress      Boolean  @default(false)      // NIEUW: Voor handmatige activatie ("Resume Mission")
   watchedEpisodes String[] @default([])         // Array of "season-episode" strings
   inWatchlist     Boolean  @default(true)       // Determines if it shows up in "My Watchlist"
 

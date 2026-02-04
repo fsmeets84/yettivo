@@ -34,7 +34,9 @@ export async function GET(req: Request) {
 
     const fullWatchlist = await prisma.watchlistItem.findMany({
       where: { userId },
-      orderBy: { createdAt: "desc" },
+      orderBy: { 
+        updatedAt: "desc" // Prisma herkent dit nu na de 'generate' stap
+      },
     });
 
     return NextResponse.json(fullWatchlist);
@@ -56,7 +58,8 @@ export async function POST(req: Request) {
         userId_tmdbId_type: { userId, tmdbId: String(tmdbId), type }
       },
       update: {
-        inWatchlist: true // Als het item al bestond (als 'watched'), activeer nu de watchlist status
+        inWatchlist: true,
+        updatedAt: new Date() // Vernieuw tijdstempel bij opnieuw toevoegen
       },
       create: {
         userId,
@@ -81,28 +84,47 @@ export async function PATCH(req: Request) {
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json();
-    const { tmdbId, type, isWatched, watchedEpisodes, inWatchlist, title, posterPath, voteAverage } = body;
+    const { 
+      tmdbId, 
+      type, 
+      isWatched, 
+      watchedEpisodes, 
+      inWatchlist, 
+      inProgress, 
+      title, 
+      posterPath, 
+      voteAverage 
+    } = body;
 
-    // Gebruik UPSERT: Maak het item aan als het nog niet bestaat (bijv. direct op 'watched' klikken)
     const updatedItem = await prisma.watchlistItem.upsert({
       where: {
         userId_tmdbId_type: { userId, tmdbId: String(tmdbId), type },
       },
       update: {
-        isWatched: isWatched !== undefined ? isWatched : undefined,
+        // Gebruik de expliciete boolean check
+        isWatched: typeof isWatched === "boolean" ? isWatched : undefined,
         watchedEpisodes: watchedEpisodes !== undefined ? watchedEpisodes : undefined,
-        inWatchlist: inWatchlist !== undefined ? inWatchlist : undefined,
+        inWatchlist: typeof inWatchlist === "boolean" ? inWatchlist : undefined,
+        inProgress: typeof inProgress === "boolean" ? inProgress : undefined, 
+        
+        // Update metadata ALTIJD als het wordt meegestuurd (voorkomt Unknown)
+        title: title || undefined,
+        posterPath: posterPath || undefined,
+        voteAverage: voteAverage ? parseFloat(voteAverage) : undefined,
+        
+        updatedAt: new Date(), 
       },
       create: {
         userId,
         tmdbId: String(tmdbId),
         type,
-        title: title || "Unknown",
+        title: title || "Classified Signal", // Iets betere fallback dan Unknown
         posterPath: posterPath || null,
         voteAverage: voteAverage ? parseFloat(voteAverage) : null,
         isWatched: isWatched || false,
         watchedEpisodes: watchedEpisodes || [],
-        inWatchlist: inWatchlist || false, // Belangrijk: standaard false als je alleen 'watched' toggelt
+        inWatchlist: inWatchlist || false,
+        inProgress: inProgress || false,
       }
     });
 

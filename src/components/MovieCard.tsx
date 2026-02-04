@@ -1,11 +1,12 @@
 "use client";
 
-import { memo, useState } from "react"; // useState toegevoegd
+import { memo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useWatchlist } from "@/context/WatchlistContext";
 import { useSession } from "next-auth/react";
-import ConfirmModal from "./ConfirmModal"; // Zorg dat dit pad klopt
+import ConfirmModal from "./ConfirmModal";
+import { useState } from "react";
 import { 
   EyeIcon,
   StarIcon,
@@ -14,8 +15,8 @@ import {
 import { BookmarkIcon as BookmarkSolid, EyeIcon as EyeSolid } from "@heroicons/react/24/solid";
 
 const MovieCard = memo(function MovieCard({ id, title, posterPath, voteAverage, type }: any) {
-  const { data: session } = useSession();
-  const isLoggedIn = !!session;
+  const { status } = useSession();
+  const isLoggedIn = status === "authenticated";
 
   const { 
     removeFromWatchlist, 
@@ -23,21 +24,30 @@ const MovieCard = memo(function MovieCard({ id, title, posterPath, voteAverage, 
     isInWatchlist, 
     isMovieWatched, 
     toggleWatched, 
-    toggleAllEpisodesWatched 
+    toggleAllEpisodesWatched,
+    watchlist // We halen de watchlist array binnen om re-renders te forceren
   } = useWatchlist();
   
-  const [isModalOpen, setIsModalOpen] = useState(false); // State voor de modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
   
+  // Deze waarden zijn nu direct afhankelijk van de 'watchlist' state in de context
   const inWatchlist = isInWatchlist(id);
   const isWatched = isMovieWatched(id);
 
   const handleToggleWatchlist = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    
     if (inWatchlist) {
       await removeFromWatchlist(id, type);
     } else {
-      await addToWatchlist({ tmdbId: id, title, posterPath, voteAverage, type });
+      await addToWatchlist({ 
+        tmdbId: Number(id), 
+        title, 
+        posterPath, 
+        voteAverage, 
+        type 
+      });
     }
   };
 
@@ -47,15 +57,19 @@ const MovieCard = memo(function MovieCard({ id, title, posterPath, voteAverage, 
     
     if (type === 'movie') {
       await toggleWatched(id, { title, posterPath, voteAverage });
-    } else if (type === 'tv') {
-      // Open de custom modal in plaats van window.confirm
+    } else {
       setIsModalOpen(true);
     }
   };
 
   const handleConfirmAllWatched = async () => {
     setIsModalOpen(false);
-    await toggleAllEpisodesWatched(id, { title, posterPath, voteAverage });
+    await toggleAllEpisodesWatched(id, { 
+      title, 
+      posterPath, 
+      voteAverage,
+      forceUnwatch: isWatched 
+    } as any);
   };
 
   return (
@@ -73,7 +87,6 @@ const MovieCard = memo(function MovieCard({ id, title, posterPath, voteAverage, 
                 fill
                 sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 20vw"
                 className={`object-cover transition-all duration-500 ${isLoggedIn && isWatched ? 'opacity-30 grayscale' : 'opacity-90 group-hover:opacity-100'}`}
-                priority={false} 
               />
             ) : (
               <div className="flex h-full items-center justify-center text-zinc-600 text-[10px] font-bold uppercase tracking-widest bg-zinc-900">No Image</div>
@@ -83,10 +96,11 @@ const MovieCard = memo(function MovieCard({ id, title, posterPath, voteAverage, 
           {isLoggedIn && (
             <div className="absolute top-2 left-2 flex gap-1.5 z-50">
               <button
+                type="button"
                 onClick={handleToggleWatchlist}
-                className={`p-1.5 rounded-sm border backdrop-blur-md transition-all duration-300 ${
+                className={`p-1.5 rounded-sm border backdrop-blur-md transition-all duration-300 pointer-events-auto ${
                   inWatchlist 
-                    ? 'bg-[#3b82f6] border-[#3b82f6] text-white' 
+                    ? 'bg-[#3b82f6] border-[#3b82f6] text-white shadow-[0_0_10px_rgba(59,130,246,0.3)]' 
                     : 'bg-black/40 border-white/10 text-white/70 hover:text-white hover:border-white/30'
                 }`}
               >
@@ -94,10 +108,11 @@ const MovieCard = memo(function MovieCard({ id, title, posterPath, voteAverage, 
               </button>
 
               <button
+                type="button"
                 onClick={handleToggleWatched}
-                className={`p-1.5 rounded-sm border backdrop-blur-md transition-all duration-300 ${
+                className={`p-1.5 rounded-sm border backdrop-blur-md transition-all duration-300 pointer-events-auto ${
                   isWatched 
-                    ? 'bg-emerald-500 border-emerald-400 text-white' 
+                    ? 'bg-emerald-500 border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.3)]' 
                     : 'bg-black/40 border-white/10 text-white/70 hover:text-white hover:border-white/30'
                 }`}
               >
@@ -127,11 +142,12 @@ const MovieCard = memo(function MovieCard({ id, title, posterPath, voteAverage, 
         </div>
       </div>
 
-      {/* De Custom Modal */}
       <ConfirmModal 
         isOpen={isModalOpen}
-        title="Mark as Completed"
-        message={`Do you want to mark all episodes of "${title}" as completed?`}
+        title={isWatched ? "Remove completion" : "Mark as Completed"}
+        message={isWatched 
+          ? `Do you want to remove the completed status for "${title}"?`
+          : `Do you want to mark all episodes of "${title}" as completed?`}
         onConfirm={handleConfirmAllWatched}
         onCancel={() => setIsModalOpen(false)}
       />

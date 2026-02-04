@@ -11,9 +11,11 @@ export interface WatchlistItem {
   voteAverage: number;
   type: 'movie' | 'tv';
   addedAt: string;
+  updatedAt?: string;
   isWatched?: boolean;
   watchedEpisodes?: string[];
   inWatchlist?: boolean;
+  inProgress?: boolean; 
 }
 
 interface ToggleData extends Partial<WatchlistItem> {
@@ -29,8 +31,8 @@ interface WatchlistContextType {
   isMovieWatched: (id: number | string) => boolean;
   toggleEpisodeWatched: (tvId: number, seasonNumber: number, episodeNumber: number) => Promise<void>;
   toggleAllEpisodesWatched: (tvId: number, movieData?: ToggleData) => Promise<void>;
-  // Nieuwe bulk functie toegevoegd aan de interface
   toggleSeasonWatched: (tvId: number, seasonNumber: number, seasonEpisodes: any[], markAsWatched: boolean) => Promise<void>;
+  setMovieInProgress: (id: number | string, status: boolean, title?: string, posterPath?: string, type?: 'movie' | 'tv') => Promise<void>;
 }
 
 const WatchlistContext = createContext<WatchlistContextType | undefined>(undefined);
@@ -41,15 +43,36 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const isLoggedIn = status === "authenticated";
 
+  // --- HELPER OM STATE TE UPDATEN EN RE-RENDER TE FORCEREN ---
+  const updateLocalItem = useCallback((updatedItem: any) => {
+    setWatchlist(prev => {
+      const index = prev.findIndex(i => String(i.tmdbId) === String(updatedItem.tmdbId) && i.type === updatedItem.type);
+      
+      if (index > -1) {
+        // Update bestaand item
+        const newWatchlist = [...prev];
+        newWatchlist[index] = { ...updatedItem, tmdbId: Number(updatedItem.tmdbId) };
+        return newWatchlist;
+      } else {
+        // Voeg nieuw item toe
+        return [...prev, { ...updatedItem, tmdbId: Number(updatedItem.tmdbId) }];
+      }
+    });
+  }, []);
+
   const isInWatchlist = useCallback((id: number | string) => {
-    return watchlist.some(i => String(i.tmdbId) === String(id) && i.inWatchlist !== false);
+    return watchlist.some(i => String(i.tmdbId) === String(id) && i.inWatchlist === true);
+  }, [watchlist]);
+
+  const isMovieWatched = useCallback((id: number | string) => {
+    return watchlist.some(i => String(i.tmdbId) === String(id) && i.isWatched === true);
   }, [watchlist]);
 
   useEffect(() => {
     const fetchWatchlist = async () => {
       if (isLoggedIn) {
         try {
-          const res = await fetch('/api/watchlist');
+          const res = await fetch('/api/watchlist', { cache: 'no-store' });
           if (res.ok) {
             const data = await res.json();
             const formattedData = data.map((item: any) => ({
@@ -73,45 +96,37 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
       router.push("/auth/signin");
       return;
     }
-
     try {
       const res = await fetch('/api/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...item, tmdbId: String(item.tmdbId), inWatchlist: true }),
       });
-
       if (res.ok) {
         const newItem = await res.json();
-        setWatchlist(prev => {
-          const filtered = prev.filter(i => String(i.tmdbId) !== String(item.tmdbId));
-          return [...filtered, { ...newItem, tmdbId: Number(newItem.tmdbId) }];
-        });
+        updateLocalItem(newItem);
       }
-    } catch (error) {
-      console.error('Error adding to database:', error);
-    }
+    } catch (error) { console.error('Error adding to database:', error); }
   };
 
   const removeFromWatchlist = async (id: number | string, type: 'movie' | 'tv') => {
     if (!isLoggedIn) return;
     try {
-      const res = await fetch(`/api/watchlist?tmdbId=${String(id)}&type=${type}`, { method: 'DELETE' });
+      const res = await fetch('/api/watchlist', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tmdbId: String(id), type, inWatchlist: false }),
+      });
       if (res.ok) {
-        setWatchlist(prev => prev.filter(i => String(i.tmdbId) !== String(id)));
+        const updatedItem = await res.json();
+        updateLocalItem(updatedItem);
       }
-    } catch (error) { 
-      console.error('Error removing from database:', error); 
-    }
+    } catch (error) { console.error('Error removing from database:', error); }
   };
 
   const toggleWatched = async (id: number | string, movieData?: Partial<WatchlistItem>) => {
-    if (!isLoggedIn) {
-      router.push("/auth/signin");
-      return;
-    }
-
-    const item = watchlist.find(i => String(i.tmdbId) === String(id));
+    if (!isLoggedIn) return;
+    const item = watchlist.find(i => String(i.tmdbId) === String(id) && i.type === 'movie');
     const newWatchedState = item ? !item.isWatched : true;
 
     try {
@@ -122,34 +137,20 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
           tmdbId: String(id),
           type: 'movie',
           isWatched: newWatchedState,
+          inProgress: newWatchedState ? false : undefined,
           ...movieData 
         }),
       });
-
       if (res.ok) {
         const updatedItem = await res.json();
-        setWatchlist(prev => {
-          const exists = prev.some(i => String(i.tmdbId) === String(id));
-          if (exists) {
-            return prev.map(i => String(i.tmdbId) === String(id) ? { ...i, isWatched: newWatchedState } : i);
-          }
-          return [...prev, { ...updatedItem, tmdbId: Number(updatedItem.tmdbId) }];
-        });
+        updateLocalItem(updatedItem);
       }
-    } catch (error) {
-      console.error('Error updating watched status:', error);
-    }
-  };
-
-  const isMovieWatched = (id: number | string) => {
-    const item = watchlist.find(i => String(i.tmdbId) === String(id));
-    if (!item) return false;
-    return !!item.isWatched;
+    } catch (error) { console.error('Error updating watched status:', error); }
   };
 
   const toggleEpisodeWatched = async (tvId: number, seasonNumber: number, episodeNumber: number) => {
     if (!isLoggedIn) return;
-    const item = watchlist.find(i => String(i.tmdbId) === String(tvId));
+    const item = watchlist.find(i => String(i.tmdbId) === String(tvId) && i.type === 'tv');
     if (!item) return;
 
     const epKey = `${seasonNumber}-${episodeNumber}`;
@@ -165,84 +166,35 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({
           tmdbId: String(tvId),
           type: 'tv',
-          watchedEpisodes: newEpisodes
+          watchedEpisodes: newEpisodes,
         }),
       });
-
       if (res.ok) {
-        setWatchlist(prev => prev.map(i => 
-          String(i.tmdbId) === String(tvId) ? { ...i, watchedEpisodes: newEpisodes } : i
-        ));
+        const updatedItem = await res.json();
+        updateLocalItem(updatedItem);
       }
-    } catch (error) { 
-      console.error('Error updating episodes:', error); 
-    }
-  };
-
-  // --- NIEUWE FUNCTIE: Bulk update voor een heel seizoen ---
-  const toggleSeasonWatched = async (tvId: number, seasonNumber: number, seasonEpisodes: any[], markAsWatched: boolean) => {
-    if (!isLoggedIn) return;
-    const item = watchlist.find(i => String(i.tmdbId) === String(tvId));
-    if (!item) return;
-
-    const currentEpisodes = item.watchedEpisodes || [];
-    const seasonKeys = seasonEpisodes.map(ep => `${seasonNumber}-${ep.episode_number}`);
-    
-    let newEpisodes: string[];
-    if (markAsWatched) {
-      // Voeg alle afleveringen van dit seizoen toe, voorkom dubbelen
-      newEpisodes = Array.from(new Set([...currentEpisodes, ...seasonKeys]));
-    } else {
-      // Verwijder alle afleveringen van dit seizoen uit de lijst
-      newEpisodes = currentEpisodes.filter(epKey => !seasonKeys.includes(epKey));
-    }
-
-    try {
-      const res = await fetch('/api/watchlist', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tmdbId: String(tvId),
-          type: 'tv',
-          watchedEpisodes: newEpisodes
-        }),
-      });
-
-      if (res.ok) {
-        setWatchlist(prev => prev.map(i => 
-          String(i.tmdbId) === String(tvId) ? { ...i, watchedEpisodes: newEpisodes } : i
-        ));
-      }
-    } catch (error) {
-      console.error('Error updating season status:', error);
-    }
+    } catch (error) { console.error('Error updating episodes:', error); }
   };
 
   const toggleAllEpisodesWatched = async (tvId: number, movieData?: ToggleData) => {
-    if (!isLoggedIn) {
-      router.push("/auth/signin");
-      return;
-    }
-
+    if (!isLoggedIn) return;
+    const item = watchlist.find(i => String(i.tmdbId) === String(tvId) && i.type === 'tv');
     const { forceUnwatch, ...cleanMovieData } = movieData || {};
-    const newWatchedState = !forceUnwatch;
+    const newWatchedState = forceUnwatch !== undefined ? !forceUnwatch : true;
 
     try {
       let allEpisodeKeys: string[] = [];
-      if (!forceUnwatch) {
+      if (newWatchedState) {
         const apiKey = process.env.NEXT_PUBLIC_TMDB_API_KEY;
         const res = await fetch(`https://api.themoviedb.org/3/tv/${tvId}?api_key=${apiKey}`);
         const tvData = await res.json();
-
-        if (tvData.seasons) {
-          tvData.seasons.forEach((season: any) => {
-            if (season.season_number > 0) {
-              for (let i = 1; i <= season.episode_count; i++) {
-                allEpisodeKeys.push(`${season.season_number}-${i}`);
-              }
+        tvData.seasons?.forEach((season: any) => {
+          if (season.season_number > 0) {
+            for (let i = 1; i <= season.episode_count; i++) {
+              allEpisodeKeys.push(`${season.season_number}-${i}`);
             }
-          });
-        }
+          }
+        });
       }
 
       const patchRes = await fetch('/api/watchlist', {
@@ -253,40 +205,61 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
           type: 'tv',
           watchedEpisodes: allEpisodeKeys,
           isWatched: newWatchedState,
+          inProgress: false,
           ...cleanMovieData
         }),
       });
-
       if (patchRes.ok) {
         const updatedItem = await patchRes.json();
-        setWatchlist(prev => {
-          const exists = prev.some(i => String(i.tmdbId) === String(tvId));
-          if (exists) {
-            return prev.map(i => 
-              String(i.tmdbId) === String(tvId) 
-                ? { ...i, watchedEpisodes: allEpisodeKeys, isWatched: newWatchedState } 
-                : i
-            );
-          }
-          return [...prev, { ...updatedItem, tmdbId: Number(updatedItem.tmdbId) }];
-        });
+        updateLocalItem(updatedItem);
       }
-    } catch (error) {
-      console.error('Error toggling all episodes:', error);
-    }
+    } catch (error) { console.error('Error toggling all episodes:', error); }
+  };
+
+  const toggleSeasonWatched = async (tvId: number, seasonNumber: number, seasonEpisodes: any[], markAsWatched: boolean) => {
+    if (!isLoggedIn) return;
+    const item = watchlist.find(i => String(i.tmdbId) === String(tvId) && i.type === 'tv');
+    if (!item) return;
+
+    const currentEpisodes = item.watchedEpisodes || [];
+    const seasonKeys = seasonEpisodes.map(ep => `${seasonNumber}-${ep.episode_number}`);
+    const newEpisodes = markAsWatched 
+      ? Array.from(new Set([...currentEpisodes, ...seasonKeys]))
+      : currentEpisodes.filter(epKey => !seasonKeys.includes(epKey));
+
+    try {
+      const res = await fetch('/api/watchlist', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tmdbId: String(tvId), type: 'tv', watchedEpisodes: newEpisodes }),
+      });
+      if (res.ok) {
+        const updatedItem = await res.json();
+        updateLocalItem(updatedItem);
+      }
+    } catch (error) { console.error('Error updating season status:', error); }
+  };
+
+  const setMovieInProgress = async (id: number | string, inProgressStatus: boolean, title?: string, posterPath?: string, type: 'movie' | 'tv' = 'tv') => {
+    if (!isLoggedIn) return;
+    try {
+      const res = await fetch('/api/watchlist', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tmdbId: String(id), type, inProgress: inProgressStatus, title, posterPath }),
+      });
+      if (res.ok) {
+        const updatedItem = await res.json();
+        updateLocalItem(updatedItem);
+      }
+    } catch (error) { console.error('Error in setMovieInProgress:', error); }
   };
 
   return (
     <WatchlistContext.Provider value={{ 
-      watchlist, 
-      addToWatchlist, 
-      removeFromWatchlist, 
-      isInWatchlist, 
-      toggleWatched, 
-      isMovieWatched, 
-      toggleEpisodeWatched,
-      toggleAllEpisodesWatched,
-      toggleSeasonWatched // Nieuwe functie beschikbaar maken
+      watchlist, addToWatchlist, removeFromWatchlist, isInWatchlist, 
+      toggleWatched, isMovieWatched, toggleEpisodeWatched,
+      toggleAllEpisodesWatched, toggleSeasonWatched, setMovieInProgress
     }}>
       {children}
     </WatchlistContext.Provider>
