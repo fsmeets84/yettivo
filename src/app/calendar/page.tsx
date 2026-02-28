@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useWatchlist } from "@/context/WatchlistContext";
 import Image from "next/image";
 import { 
@@ -18,12 +18,19 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
 
+  const watchlistKey = useMemo(() => {
+    return watchlist
+      .filter(item => !item.isWatched)
+      .map(item => item.tmdbId)
+      .join(',');
+  }, [watchlist]);
+
   useEffect(() => {
     const fetchReleases = async () => {
-      // Alleen items checken die nog niet 'Completed' zijn voor een snellere kalender
       const activeWatchlist = watchlist.filter(item => !item.isWatched);
       
       if (activeWatchlist.length === 0) {
+        setEvents([]);
         setLoading(false);
         return;
       }
@@ -34,50 +41,52 @@ export default function CalendarPage() {
 
       try {
         const promises = activeWatchlist.map(async (item) => {
-          const res = await fetch(
-            `https://api.themoviedb.org/3/${item.type}/${item.tmdbId}?api_key=${apiKey}`
-          );
-          const data = await res.json();
+          try {
+            const res = await fetch(
+              `https://api.themoviedb.org/3/${item.type}/${item.tmdbId}?api_key=${apiKey}`
+            );
+            const data = await res.json();
 
-          if (item.type === "tv" && data.next_episode_to_air) {
-            allEvents.push({
-              date: new Date(data.next_episode_to_air.air_date),
-              title: data.name,
-              subTitle: `S${data.next_episode_to_air.season_number} E${data.next_episode_to_air.episode_number}`,
-              episodeName: data.next_episode_to_air.name,
-              overview: data.next_episode_to_air.overview || data.overview,
-              rating: data.vote_average,
-              image: data.poster_path,
-              id: item.tmdbId,
-              type: "tv"
-            });
-          } else if (item.type === "movie" && data.release_date) {
-            const releaseDate = new Date(data.release_date);
-            // Alleen movies tonen die in de huidige getoonde maand (of nabij) vallen
-            allEvents.push({
-              date: releaseDate,
-              title: data.title,
-              subTitle: "Movie Premiere",
-              overview: data.overview,
-              rating: data.vote_average,
-              image: data.poster_path,
-              id: item.tmdbId,
-              type: "movie"
-            });
+            if (item.type === "tv" && data.next_episode_to_air) {
+              allEvents.push({
+                date: new Date(data.next_episode_to_air.air_date),
+                title: data.name,
+                subTitle: `S${data.next_episode_to_air.season_number} E${data.next_episode_to_air.episode_number}`,
+                episodeName: data.next_episode_to_air.name,
+                overview: data.next_episode_to_air.overview || data.overview,
+                rating: data.vote_average,
+                image: data.poster_path,
+                id: item.tmdbId,
+                type: "tv"
+              });
+            } else if (item.type === "movie" && data.release_date) {
+              allEvents.push({
+                date: new Date(data.release_date),
+                title: data.title,
+                subTitle: "Movie Premiere",
+                overview: data.overview,
+                rating: data.vote_average,
+                image: data.poster_path,
+                id: item.tmdbId,
+                type: "movie"
+              });
+            }
+          } catch (err) {
+            console.error(`Failed to fetch for ${item.tmdbId}`, err);
           }
         });
 
         await Promise.all(promises);
         setEvents(allEvents);
       } catch (error) {
-        console.error("Error fetching calendar data:", error);
+        console.error("Calendar error:", error);
       } finally {
         setLoading(false);
       }
     };
 
     fetchReleases();
-  }, [watchlist, currentMonth]);
+  }, [watchlistKey]);
 
   const days = eachDayOfInterval({
     start: startOfMonth(currentMonth),
@@ -85,122 +94,140 @@ export default function CalendarPage() {
   });
 
   return (
-    <main className="min-h-screen bg-[#0a0a0c] text-white pt-32 pb-20 px-8 relative overflow-hidden">
-      <div className="container mx-auto relative z-10">
+    <main className="min-h-screen bg-[#0a0a0c] text-white pt-32 pb-20 relative overflow-hidden">
+      {/* Premium Ambient Background */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[500px] bg-blue-600/5 blur-[120px] rounded-full pointer-events-none" />
+
+      <div className="container mx-auto px-8 relative z-10 max-w-[1800px]">
         
-        {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-end mb-12 gap-6 animate-in fade-in slide-in-from-top-4 duration-700">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-[#3b82f6]">
+        {/* Header Section */}
+        <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8 animate-in fade-in slide-in-from-left-4 duration-700">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-blue-500">
               <CalendarIcon className="h-4 w-4" />
-              <span className="text-[10px] font-black tracking-[0.2em] uppercase">Release Schedule</span>
+              <span className="text-[10px] font-black tracking-[0.2em] uppercase">Schedule Archive</span>
             </div>
-            <h1 className="text-5xl font-bold tracking-tighter">
+            <h1 className="text-5xl font-black tracking-tighter capitalize leading-none">
               {format(currentMonth, "MMMM yyyy")}
             </h1>
           </div>
 
-          <div className="flex gap-2">
-            <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-3 bg-white/5 border border-white/10 hover:bg-white/10 transition-all rounded-sm">
+          <div className="flex items-center gap-3 bg-white/[0.02] border border-white/5 p-1.5 rounded-sm shadow-2xl">
+            <button 
+              onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} 
+              className="p-3 hover:bg-white/5 transition-all rounded-sm text-zinc-400 hover:text-white"
+            >
               <ChevronLeftIcon className="h-5 w-5" />
             </button>
-            <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-3 bg-white/5 border border-white/10 hover:bg-white/10 transition-all rounded-sm">
+            <button 
+              onClick={() => setCurrentMonth(new Date())}
+              className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-colors"
+            >
+              Today
+            </button>
+            <button 
+              onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} 
+              className="p-3 hover:bg-white/5 transition-all rounded-sm text-zinc-400 hover:text-white"
+            >
               <ChevronRightIcon className="h-5 w-5" />
             </button>
           </div>
         </div>
 
-        {/* Calendar Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-7 border-t border-l border-white/5 animate-in fade-in duration-1000">
-          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-            <div key={day} className="p-4 border-r border-b border-white/5 text-[10px] font-black uppercase tracking-widest text-zinc-600">
-              {day}
-            </div>
-          ))}
+        {/* Calendar Grid Container */}
+        <div className="bg-[#0d0d0f]/40 border border-white/5 shadow-2xl backdrop-blur-sm animate-in fade-in duration-1000">
+          <div className="grid grid-cols-7 border-b border-white/5">
+            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+              <div key={day} className="p-5 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 text-center border-r last:border-0 border-white/5">
+                {day}
+              </div>
+            ))}
+          </div>
           
-          {days.map((day) => {
-            const dayEvents = events.filter(e => isSameDay(e.date, day));
-            const isToday = isSameDay(day, new Date());
+          <div className="grid grid-cols-1 md:grid-cols-7">
+            {days.map((day) => {
+              const dayEvents = events.filter(e => isSameDay(e.date, day));
+              const isToday = isSameDay(day, new Date());
 
-            return (
-              <div key={day.toString()} className={`min-h-[140px] p-4 border-r border-b border-white/5 transition-colors ${isToday ? "bg-[#3b82f6]/5" : "hover:bg-white/[0.01]"}`}>
-                <span className={`text-sm font-bold ${isToday ? "text-[#3b82f6]" : "text-zinc-600"}`}>
-                  {format(day, "d")}
-                </span>
-                
-                <div className="mt-4 space-y-2">
-                  {dayEvents.map((event, i) => (
-                    <div key={i} className="relative group/item">
-                      <button 
-                        onClick={() => setSelectedEvent(event)}
-                        className="w-full text-left p-2.5 rounded-sm bg-[#3b82f6]/10 border border-[#3b82f6]/20 hover:border-[#3b82f6]/50 transition-all"
-                      >
-                        <div className="flex justify-between items-start gap-2">
-                          <p className="text-[12px] font-bold text-zinc-100 truncate leading-tight">
+              return (
+                <div key={day.toString()} className={`min-h-[160px] p-4 border-r border-b border-white/5 last:border-r-0 transition-colors ${isToday ? "bg-blue-600/[0.03]" : "hover:bg-white/[0.01]"}`}>
+                  <div className="flex justify-between items-start">
+                    <span className={`text-xs font-bold tracking-widest ${isToday ? "text-blue-500" : "text-zinc-600"}`}>
+                      {format(day, "d")}
+                    </span>
+                  </div>
+                  
+                  <div className="mt-4 space-y-1.5">
+                    {dayEvents.map((event, i) => (
+                      <div key={i} className="relative group/item">
+                        <button 
+                          onClick={() => setSelectedEvent(event)}
+                          className="w-full text-left p-2.5 rounded-sm bg-blue-600/10 border border-blue-500/20 hover:border-blue-500/50 transition-all"
+                        >
+                          <p className="text-[11px] font-bold text-zinc-100 truncate group-hover:text-blue-400 transition-colors">
                             {event.title}
                           </p>
-                        </div>
-                      </button>
+                        </button>
 
-                      {/* HOVER PREVIEW CARD */}
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 w-72 z-[120] opacity-0 invisible group-hover/item:opacity-100 group-hover/item:visible transition-all duration-300 pointer-events-none">
-                        <div className="bg-[#141417] border border-white/10 rounded-sm overflow-hidden shadow-2xl">
-                          <div className="relative h-40 w-full">
-                            <Image src={`https://image.tmdb.org/t/p/w500${event.image}`} alt="" fill className="object-cover opacity-80" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-[#141417] via-transparent to-transparent" />
-                            <div className="absolute bottom-3 left-3 right-3 flex justify-between items-end">
-                              <span className="text-[9px] font-black uppercase tracking-widest text-[#3b82f6] bg-black/80 px-2 py-1 rounded-sm flex items-center gap-1.5 shadow-lg border border-white/5">
-                                {event.type === 'tv' ? <TvIcon className="h-3 w-3" /> : <FilmIcon className="h-3 w-3" />}
-                                {event.subTitle}
-                              </span>
+                        {/* Hover Preview Card */}
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 w-72 z-[120] opacity-0 invisible group-hover/item:opacity-100 group-hover/item:visible transition-all duration-300 pointer-events-none translate-y-2 group-hover/item:translate-y-0">
+                          <div className="bg-[#141417] border border-white/10 rounded-sm overflow-hidden shadow-2xl">
+                            <div className="relative h-44 w-full">
+                              <Image src={`https://image.tmdb.org/t/p/w500${event.image}`} alt="" fill className="object-cover opacity-80" />
+                              <div className="absolute inset-0 bg-gradient-to-t from-[#141417] via-transparent to-transparent" />
+                              <div className="absolute bottom-3 left-3">
+                                <span className="text-[8px] font-black uppercase tracking-widest text-white bg-blue-600 px-2 py-1 rounded-sm flex items-center gap-1.5">
+                                  {event.type === 'tv' ? <TvIcon className="h-3 w-3" /> : <FilmIcon className="h-3 w-3" />}
+                                  {event.subTitle}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="p-4">
+                              <p className="text-sm font-bold text-white mb-2">{event.title}</p>
+                              <p className="text-[11px] text-zinc-400 line-clamp-3 leading-relaxed font-medium">
+                                {event.overview}
+                              </p>
                             </div>
                           </div>
-                          <div className="p-4">
-                            <p className="text-sm font-bold text-white mb-1.5">{event.title}</p>
-                            <p className="text-[11px] text-zinc-400 line-clamp-3 leading-relaxed font-medium">
-                              {event.overview}
-                            </p>
-                          </div>
+                          <div className="w-3 h-3 bg-[#141417] border-r border-b border-white/10 rotate-45 mx-auto -mt-1.5" />
                         </div>
-                        <div className="w-4 h-4 bg-[#141417] border-r border-b border-white/10 rotate-45 mx-auto -mt-2 shadow-2xl" />
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
       {/* Detail Slide-over */}
       {selectedEvent && (
         <div className="fixed inset-0 z-[130] flex items-center justify-end">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setSelectedEvent(null)} />
-          <div className="relative w-full max-w-md h-full bg-[#0f0f12] border-l border-white/10 p-10 shadow-2xl animate-in slide-in-from-right duration-300">
-            <button onClick={() => setSelectedEvent(null)} className="absolute top-10 right-10 text-zinc-500 hover:text-white transition-colors">
-              <XMarkIcon className="h-7 w-7" />
+          <div className="absolute inset-0 bg-black/90 backdrop-blur-md" onClick={() => setSelectedEvent(null)} />
+          <div className="relative w-full max-w-md h-full bg-[#0d0d0f] border-l border-white/10 p-12 shadow-2xl animate-in slide-in-from-right duration-500">
+            <button onClick={() => setSelectedEvent(null)} className="absolute top-10 right-10 text-zinc-600 hover:text-white transition-colors">
+              <XMarkIcon className="h-8 w-8" />
             </button>
 
-            <div className="mt-16 space-y-8">
+            <div className="mt-16 space-y-10">
               <div className="space-y-4">
-                <p className="text-[10px] font-black text-[#3b82f6] uppercase tracking-[0.2em] flex items-center gap-2">
-                  {selectedEvent.type === 'tv' ? 'TV Release' : 'Movie Release'}
-                  <span className="text-white/20">•</span>
+                <p className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] flex items-center gap-3">
+                  {selectedEvent.type === 'tv' ? 'TV release' : 'Movie release'}
+                  <span className="text-zinc-800">|</span>
                   {selectedEvent.subTitle}
                 </p>
-                <h2 className="text-4xl font-bold text-white tracking-tighter leading-none">
+                <h2 className="text-4xl font-black text-white tracking-tighter leading-none">
                   {selectedEvent.title}
                 </h2>
                 {selectedEvent.episodeName && (
-                   <p className="text-xl font-medium text-zinc-400">"{selectedEvent.episodeName}"</p>
+                   <p className="text-xl font-medium text-zinc-400 leading-tight">"{selectedEvent.episodeName}"</p>
                 )}
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-6 pt-4 border-t border-white/5">
                   <div className="flex items-center gap-1.5 text-[13px] font-bold text-white">
-                    <StarIcon className="h-4 w-4 text-[#3b82f6] fill-[#3b82f6]" />
+                    <StarIcon className="h-4 w-4 text-blue-500 fill-blue-500" />
                     {selectedEvent.rating.toFixed(1)}
                   </div>
-                  <span className="text-zinc-700">|</span>
                   <span className="text-zinc-500 text-[11px] font-black uppercase tracking-widest">
                     {format(selectedEvent.date, "dd MMMM yyyy")}
                   </span>
@@ -218,9 +245,9 @@ export default function CalendarPage() {
 
               <Link 
                 href={`/${selectedEvent.type}/${selectedEvent.id}`}
-                className="block w-full py-5 bg-[#3b82f6] text-white text-center text-[10px] font-black uppercase tracking-[0.2em] rounded-sm hover:bg-[#2563eb] transition-all shadow-[0_10px_30px_rgba(59,130,246,0.3)] active:scale-95"
+                className="block w-full py-5 bg-blue-600 text-white text-center text-[10px] font-black uppercase tracking-[0.2em] rounded-sm hover:bg-blue-500 transition-all shadow-lg shadow-blue-900/20 active:scale-95"
               >
-                View Details
+                Access File Details
               </Link>
             </div>
           </div>
