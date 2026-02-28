@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
@@ -24,6 +24,7 @@ interface ToggleData extends Partial<WatchlistItem> {
 
 interface WatchlistContextType {
   watchlist: WatchlistItem[];
+  inProgressItems: WatchlistItem[]; // Nieuw: Voor snelle toegang op de Home-pagina
   addToWatchlist: (item: Omit<WatchlistItem, 'addedAt'>) => Promise<void>;
   removeFromWatchlist: (id: number | string, type: 'movie' | 'tv') => Promise<void>;
   isInWatchlist: (id: number | string) => boolean;
@@ -32,7 +33,8 @@ interface WatchlistContextType {
   toggleEpisodeWatched: (tvId: number, seasonNumber: number, episodeNumber: number) => Promise<void>;
   toggleAllEpisodesWatched: (tvId: number, movieData?: ToggleData) => Promise<void>;
   toggleSeasonWatched: (tvId: number, seasonNumber: number, seasonEpisodes: any[], markAsWatched: boolean) => Promise<void>;
-  setMovieInProgress: (id: number | string, status: boolean, title?: string, posterPath?: string, type?: 'movie' | 'tv') => Promise<void>;
+  setMovieInProgress: (id: number | string, status: boolean, title?: string, posterPath?: string, type?: 'movie' | 'tv', voteAverage?: number) => Promise<void>;
+  getWatchedEpisodesCount: (id: number | string) => number;
 }
 
 const WatchlistContext = createContext<WatchlistContextType | undefined>(undefined);
@@ -43,18 +45,21 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const isLoggedIn = status === "authenticated";
 
-  // --- HELPER OM STATE TE UPDATEN EN RE-RENDER TE FORCEREN ---
+  // Cache: Memoized lijst van items die 'in progress' zijn en nog niet volledig bekeken
+  const inProgressItems = useMemo(() => {
+    return watchlist
+      .filter(item => (item.inProgress || (item.watchedEpisodes?.length ?? 0) > 0) && !item.isWatched)
+      .sort((a, b) => new Date(b.updatedAt || b.addedAt).getTime() - new Date(a.updatedAt || a.addedAt).getTime());
+  }, [watchlist]);
+
   const updateLocalItem = useCallback((updatedItem: any) => {
     setWatchlist(prev => {
       const index = prev.findIndex(i => String(i.tmdbId) === String(updatedItem.tmdbId) && i.type === updatedItem.type);
-      
       if (index > -1) {
-        // Update bestaand item
         const newWatchlist = [...prev];
         newWatchlist[index] = { ...updatedItem, tmdbId: Number(updatedItem.tmdbId) };
         return newWatchlist;
       } else {
-        // Voeg nieuw item toe
         return [...prev, { ...updatedItem, tmdbId: Number(updatedItem.tmdbId) }];
       }
     });
@@ -66,6 +71,11 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
 
   const isMovieWatched = useCallback((id: number | string) => {
     return watchlist.some(i => String(i.tmdbId) === String(id) && i.isWatched === true);
+  }, [watchlist]);
+
+  const getWatchedEpisodesCount = useCallback((id: number | string) => {
+    const item = watchlist.find(i => String(i.tmdbId) === String(id) && i.type === 'tv');
+    return item?.watchedEpisodes?.length || 0;
   }, [watchlist]);
 
   useEffect(() => {
@@ -137,7 +147,7 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
           tmdbId: String(id),
           type: 'movie',
           isWatched: newWatchedState,
-          inProgress: newWatchedState ? false : undefined,
+          inProgress: false, // Altijd false als het afgekeken is
           ...movieData 
         }),
       });
@@ -167,6 +177,7 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
           tmdbId: String(tvId),
           type: 'tv',
           watchedEpisodes: newEpisodes,
+          inProgress: newEpisodes.length > 0, // Automatisch in progress zetten
         }),
       });
       if (res.ok) {
@@ -178,7 +189,6 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
 
   const toggleAllEpisodesWatched = async (tvId: number, movieData?: ToggleData) => {
     if (!isLoggedIn) return;
-    const item = watchlist.find(i => String(i.tmdbId) === String(tvId) && i.type === 'tv');
     const { forceUnwatch, ...cleanMovieData } = movieData || {};
     const newWatchedState = forceUnwatch !== undefined ? !forceUnwatch : true;
 
@@ -231,7 +241,7 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch('/api/watchlist', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tmdbId: String(tvId), type: 'tv', watchedEpisodes: newEpisodes }),
+        body: JSON.stringify({ tmdbId: String(tvId), type: 'tv', watchedEpisodes: newEpisodes, inProgress: newEpisodes.length > 0 }),
       });
       if (res.ok) {
         const updatedItem = await res.json();
@@ -240,13 +250,13 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
     } catch (error) { console.error('Error updating season status:', error); }
   };
 
-  const setMovieInProgress = async (id: number | string, inProgressStatus: boolean, title?: string, posterPath?: string, type: 'movie' | 'tv' = 'tv') => {
+  const setMovieInProgress = async (id: number | string, inProgressStatus: boolean, title?: string, posterPath?: string, type: 'movie' | 'tv' = 'tv', voteAverage?: number) => {
     if (!isLoggedIn) return;
     try {
       const res = await fetch('/api/watchlist', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tmdbId: String(id), type, inProgress: inProgressStatus, title, posterPath }),
+        body: JSON.stringify({ tmdbId: String(id), type, inProgress: inProgressStatus, title, posterPath, voteAverage }),
       });
       if (res.ok) {
         const updatedItem = await res.json();
@@ -257,9 +267,10 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <WatchlistContext.Provider value={{ 
-      watchlist, addToWatchlist, removeFromWatchlist, isInWatchlist, 
+      watchlist, inProgressItems, addToWatchlist, removeFromWatchlist, isInWatchlist, 
       toggleWatched, isMovieWatched, toggleEpisodeWatched,
-      toggleAllEpisodesWatched, toggleSeasonWatched, setMovieInProgress
+      toggleAllEpisodesWatched, toggleSeasonWatched, setMovieInProgress,
+      getWatchedEpisodesCount
     }}>
       {children}
     </WatchlistContext.Provider>

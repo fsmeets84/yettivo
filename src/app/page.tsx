@@ -1,30 +1,27 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react"; // useMemo toegevoegd
+import { useEffect, useState } from "react";
 import Hero from "@/components/Hero";
 import MovieCard from "@/components/MovieCard";
+import ReleasingToday from "@/components/ReleasingToday";
+import CompatibleSignals from "@/components/CompatibleSignals"; 
 import { useWatchlist } from "@/context/WatchlistContext";
 import { useSession } from "next-auth/react";
-import { FireIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
-import Link from "next/link";
-import Image from "next/image";
+import { FireIcon, PlayIcon, BellAlertIcon } from "@heroicons/react/24/outline";
 
 export default function HomePage() {
   const [trending, setTrending] = useState<any[]>([]);
-  const [continueWatching, setContinueWatching] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   const { status } = useSession();
   const isLoggedIn = status === "authenticated";
-  const { isMovieWatched } = useWatchlist();
+  
+  // Gebruik de nieuwe gecachte lijst direct uit de context
+  const { inProgressItems } = useWatchlist();
 
-  // 1. Fetch Trending data ALLEEN bij mount of login-status verandering
   useEffect(() => {
     const fetchTrending = async () => {
-      // We zetten setLoading alleen de ALLEREERSTE keer op true
-      // zodat de pagina niet knippert bij watchlist updates
       const apiKey = process.env.NEXT_PUBLIC_TMDB_API_KEY;
-
       try {
         const res = await fetch(`https://api.themoviedb.org/3/trending/all/day?api_key=${apiKey}`);
         const data = await res.json();
@@ -35,48 +32,8 @@ export default function HomePage() {
         setLoading(false);
       }
     };
-
     fetchTrending();
-  }, [isLoggedIn]); // Verwijder isMovieWatched hier!
-
-  // 2. Aparte effect voor Continue Watching (LocalStorage)
-  useEffect(() => {
-    const fetchContinueWatching = async () => {
-      if (!isLoggedIn) {
-        setContinueWatching([]);
-        return;
-      }
-
-      const apiKey = process.env.NEXT_PUBLIC_TMDB_API_KEY;
-      const activeItems: { id: string; type: "movie" | "tv" }[] = [];
-      const processedIds = new Set();
-
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (!key?.startsWith("progress_") && !key?.startsWith("watched_tv_")) continue;
-
-        const type = key.includes("_movie_") ? "movie" : "tv";
-        const id = key.split("_").pop();
-        if (!id || processedIds.has(`${type}-${id}`)) continue;
-
-        activeItems.push({ id, type });
-        processedIds.add(`${type}-${id}`);
-      }
-
-      if (activeItems.length > 0) {
-        const details = await Promise.all(
-          activeItems.map(async (item) => {
-            const itemRes = await fetch(`https://api.themoviedb.org/3/${item.type}/${item.id}?api_key=${apiKey}`);
-            return await itemRes.json();
-          })
-        );
-        // We filteren hier op watched status zonder de hele pagina te herladen
-        setContinueWatching(details.filter(d => d.id && !isMovieWatched(d.id)));
-      }
-    };
-
-    fetchContinueWatching();
-  }, [isLoggedIn, isMovieWatched]); // Deze mag wel blijven, want Resume Mission is dynamisch
+  }, []);
 
   if (loading) {
     return (
@@ -90,37 +47,84 @@ export default function HomePage() {
     <main className="min-h-screen pb-20 bg-[#0a0a0c]">
       {trending.length > 0 && <Hero movies={trending} />}
 
-      <div className="container mx-auto px-8 relative z-20 pt-12">
-        {/* RESUME MISSION SECTION (onveranderd) */}
-        {isLoggedIn && continueWatching.length > 0 && (
-           <section className="mb-20">
-             {/* ... je bestaande resume mission code ... */}
+      <div className="container mx-auto px-8 relative z-20 -mt-10 space-y-10">
+        
+        {/* RELEASING TODAY SECTION */}
+        {isLoggedIn && (
+          <section className="bg-white/[0.02] border border-white/5 p-10 rounded-sm backdrop-blur-md shadow-2xl">
+            <header className="mb-10">
+              <div className="flex items-center gap-2 text-[#3b82f6] mb-2">
+                <BellAlertIcon className="h-4 w-4" />
+                <span className="text-[10px] font-black tracking-widest uppercase">New Releases</span>
+              </div>
+              <h2 className="text-3xl font-black text-white tracking-tight uppercase">
+                Airing Today
+              </h2>
+            </header>
+            <ReleasingToday />
+          </section>
+        )}
+
+        {/* CONTINUE WATCHING SECTION (Nu razendsnel via Context cache) */}
+        {isLoggedIn && inProgressItems.length > 0 && (
+           <section className="bg-white/[0.02] border border-white/5 p-10 rounded-sm backdrop-blur-md shadow-2xl">
+              <header className="mb-10">
+                <div className="flex items-center gap-2 text-emerald-500 mb-2">
+                  <PlayIcon className="h-4 w-4" />
+                  <span className="text-[10px] font-black tracking-widest uppercase">Resume</span>
+                </div>
+                <h2 className="text-3xl font-black text-white tracking-tight uppercase">
+                  Continue Watching
+                </h2>
+              </header>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                {inProgressItems.map((item) => (
+                  <MovieCard 
+                    key={`continue-${item.tmdbId}`}
+                    id={item.tmdbId}
+                    title={item.title}
+                    posterPath={item.posterPath}
+                    voteAverage={item.voteAverage}
+                    type={item.type}
+                  />
+                ))}
+              </div>
            </section>
         )}
 
-        {/* TRENDING SECTION */}
-        <header className="mb-10 flex items-end justify-between">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-[#3b82f6] mb-1">
-              <FireIcon className="h-4 w-4" />
-              <span className="text-[11px] font-bold tracking-tight uppercase">Trending</span>
-            </div>
-            <h2 className="text-3xl font-semibold text-white tracking-tight">Trending now</h2>
-          </div>
-        </header>
+        {/* RECOMMENDATIONS SECTION */}
+        {isLoggedIn && (
+          <section className="bg-white/[0.02] border border-white/5 rounded-sm backdrop-blur-md shadow-2xl overflow-hidden">
+            <CompatibleSignals />
+          </section>
+        )}
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
-          {trending.map((item) => (
-            <MovieCard 
-              key={`${item.media_type}-${item.id}`} // Stabiele key
-              id={item.id}
-              title={item.title || item.name}
-              posterPath={item.poster_path}
-              voteAverage={item.vote_average}
-              type={item.media_type === 'tv' ? 'tv' : 'movie'}
-            />
-          ))}
-        </div>
+        {/* TRENDING SECTION */}
+        <section className="p-10">
+          <header className="mb-10">
+            <div className="flex items-center gap-2 text-[#3b82f6] mb-2">
+              <FireIcon className="h-4 w-4" />
+              <span className="text-[10px] font-black tracking-widest uppercase">Popular</span>
+            </div>
+            <h2 className="text-3xl font-black text-white tracking-tight uppercase">
+              Trending Now
+            </h2>
+          </header>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+            {trending.map((item) => (
+              <MovieCard 
+                key={`${item.media_type}-${item.id}`}
+                id={item.id}
+                title={item.title || item.name}
+                posterPath={item.poster_path}
+                voteAverage={item.vote_average}
+                type={item.media_type === 'tv' ? 'tv' : 'movie'}
+              />
+            ))}
+          </div>
+        </section>
       </div>
     </main>
   );

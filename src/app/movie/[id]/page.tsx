@@ -1,21 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import { useWatchlist } from "@/context/WatchlistContext";
+import { useCollections } from "@/context/CollectionContext"; // Nieuwe import
 import { useSession } from "next-auth/react";
 import { 
   StarIcon, CalendarIcon, ClockIcon, BookmarkIcon,
   ChevronLeftIcon, PlayIcon, EyeIcon, InformationCircleIcon,
-  ArchiveBoxIcon, ArrowPathIcon
+  DocumentTextIcon, UserGroupIcon, FilmIcon,
+  ArrowPathIcon, FolderPlusIcon, PlusCircleIcon, FolderIcon
 } from "@heroicons/react/24/outline";
 import { 
   BookmarkIcon as BookmarkSolid, 
   EyeIcon as EyeSolid,
-  CheckCircleIcon as CheckSolid 
+  CheckCircleIcon as CheckSolid,
+  CheckIcon
 } from "@heroicons/react/24/solid";
 import { useParams, useRouter } from "next/navigation";
 import TrailerModal from "@/components/TrailerModal";
+import CastSection from "@/components/CastSection"; 
+import CreateCollectionModal from "@/components/CreateCollectionModal";
 
 export default function MovieDetailPage() {
   const { id } = useParams();
@@ -28,6 +33,10 @@ export default function MovieDetailPage() {
   const [trailer, setTrailer] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isTrailerOpen, setIsTrailerOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"details" | "cast">("details"); 
+  const [showCollections, setShowCollections] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   
   const { 
     isInWatchlist, 
@@ -39,10 +48,23 @@ export default function MovieDetailPage() {
     setMovieInProgress 
   } = useWatchlist();
 
+  const { collections, addItemToCollection, removeItemFromCollection } = useCollections();
+
   const movieInDb = watchlist.find(item => String(item.tmdbId) === String(id));
   const watched = isMovieWatched(Number(id));
   const inWatchlist = isInWatchlist(Number(id));
   const isInProgress = movieInDb?.inProgress || false;
+  const inAnyCollection = collections.some(col => col.items.some(i => String(i.tmdbId) === String(id)));
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowCollections(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     const fetchMovieData = async () => {
@@ -70,37 +92,36 @@ export default function MovieDetailPage() {
     fetchMovieData();
   }, [id]);
 
-  // VERBETERDE FUNCTIE: Toggle de watching status (starten of stoppen)
+  const handleCollectionToggle = (collectionId: string, inCollection: boolean) => {
+    if (!movie) return;
+    const item = { 
+      tmdbId: movie.id, 
+      title: movie.title, 
+      posterPath: movie.poster_path, 
+      type: 'movie' as const, 
+      voteAverage: movie.vote_average 
+    };
+    if (inCollection) {
+      removeItemFromCollection(collectionId, movie.id);
+    } else {
+      addItemToCollection(collectionId, item);
+    }
+  };
+
+  // ... (handleToggleWatching, handleToggleWatched, handleWatchlistAction blijven gelijk)
   const handleToggleWatching = async () => {
     if (watched || !isLoggedIn || !movie) return;
-
     try {
-      // 1. Voeg toe aan watchlist als hij er nog niet in staat
       if (!inWatchlist) {
-        await addToWatchlist({ 
-          tmdbId: movie.id, 
-          title: movie.title, 
-          posterPath: movie.poster_path, 
-          type: 'movie', 
-          voteAverage: movie.vote_average 
-        });
+        await addToWatchlist({ tmdbId: movie.id, title: movie.title, posterPath: movie.poster_path, type: 'movie', voteAverage: movie.vote_average });
       }
-
-      // 2. Toggle de status: als het true was naar false, en vice versa
       await setMovieInProgress(Number(id), !isInProgress);
-    } catch (error) {
-      console.error("Failed to toggle watching status:", error);
-    }
+    } catch (error) { console.error(error); }
   };
 
   const handleToggleWatched = async () => {
     if (!isLoggedIn || !id || !movie) return;
-    
-    await toggleWatched(Number(id), { 
-      title: movie.title, 
-      posterPath: movie.poster_path, 
-      voteAverage: movie.vote_average 
-    });
+    await toggleWatched(Number(id), { title: movie.title, posterPath: movie.poster_path, voteAverage: movie.vote_average });
   };
 
   const handleWatchlistAction = async () => {
@@ -108,13 +129,7 @@ export default function MovieDetailPage() {
     if (inWatchlist) {
       await removeFromWatchlist(movie.id, 'movie');
     } else {
-      await addToWatchlist({ 
-        tmdbId: movie.id, 
-        title: movie.title, 
-        posterPath: movie.poster_path, 
-        type: 'movie', 
-        voteAverage: movie.vote_average 
-      });
+      await addToWatchlist({ tmdbId: movie.id, title: movie.title, posterPath: movie.poster_path, type: 'movie', voteAverage: movie.vote_average });
     }
   };
 
@@ -133,6 +148,18 @@ export default function MovieDetailPage() {
           onClose={() => setIsTrailerOpen(false)} 
         />
       )}
+
+      <CreateCollectionModal 
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        itemToAutoAdd={movie ? {
+          tmdbId: movie.id,
+          title: movie.title,
+          posterPath: movie.poster_path,
+          type: 'movie',
+          voteAverage: movie.vote_average
+        } : null}
+      />
 
       <section className="relative h-[85vh] w-full">
         <div 
@@ -155,14 +182,14 @@ export default function MovieDetailPage() {
           onClick={() => router.back()} 
           className="absolute top-28 left-8 flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] text-white/40 hover:text-[#3b82f6] transition-all z-30 group"
         >
-          <ChevronLeftIcon className="h-3 w-3 transition-transform group-hover:-translate-x-1" /> Back to archive
+          <ChevronLeftIcon className="h-3 w-3 transition-transform group-hover:-translate-x-1" /> Back
         </button>
       </section>
 
       <div className="container mx-auto px-8 -mt-96 relative z-10 pb-20">
         <div className="flex flex-col lg:flex-row gap-16 items-start">
           
-          <div className="w-72 flex-shrink-0 mx-auto lg:mx-0">
+          <div className="w-72 flex-shrink-0 mx-auto lg:mx-0 space-y-10">
             <div className="aspect-[2/3] relative overflow-hidden shadow-2xl rounded-sm border border-white/10 group bg-zinc-900">
               {movie.poster_path ? (
                 <Image 
@@ -175,14 +202,32 @@ export default function MovieDetailPage() {
                 <div className="flex h-full items-center justify-center text-zinc-700 text-[10px] font-bold uppercase tracking-widest">No Poster</div>
               )}
             </div>
+
+            <aside className="hidden lg:block space-y-2 sticky top-28">
+              <p className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em] mb-4 px-2">Navigation</p>
+              <button 
+                onClick={() => setActiveTab("details")}
+                className={`w-full flex items-center gap-4 px-4 py-4 rounded-sm transition-all duration-300 ${activeTab === "details" ? "bg-[#3b82f6] text-white shadow-[0_0_20px_rgba(59,130,246,0.3)]" : "text-zinc-500 hover:text-white hover:bg-white/5"}`}
+              >
+                <DocumentTextIcon className="h-5 w-5" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Details</span>
+              </button>
+              <button 
+                onClick={() => setActiveTab("cast")}
+                className={`w-full flex items-center gap-4 px-4 py-4 rounded-sm transition-all duration-300 ${activeTab === "cast" ? "bg-[#3b82f6] text-white shadow-[0_0_20px_rgba(59,130,246,0.3)]" : "text-zinc-500 hover:text-white hover:bg-white/5"}`}
+              >
+                <UserGroupIcon className="h-5 w-5" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Cast</span>
+              </button>
+            </aside>
           </div>
 
-          <div className="flex-1 space-y-10 pt-8">
+          <div className="flex-1 space-y-10 pt-8 min-w-0">
             <div className="space-y-6">
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2 px-3 py-1 bg-[#3b82f6]/10 border border-[#3b82f6]/20 rounded-sm">
-                  <ArchiveBoxIcon className="h-3 w-3 text-[#3b82f6]" />
-                  <span className="text-[#3b82f6] text-[10px] font-black tracking-widest uppercase">Archive Entry</span>
+                  <FilmIcon className="h-3 w-3 text-[#3b82f6]" />
+                  <span className="text-[#3b82f6] text-[10px] font-black tracking-widest uppercase">Movie Info</span>
                 </div>
                 <div className="flex items-center gap-1.5 text-white font-black text-[10px] uppercase tracking-widest">
                   <StarIcon className="h-3.5 w-3.5 text-[#3b82f6] fill-[#3b82f6]" />
@@ -201,20 +246,20 @@ export default function MovieDetailPage() {
                   />
                 </div>
               ) : (
-                <h1 className="text-6xl md:text-8xl font-bold text-white tracking-tighter leading-[0.85]">
+                <h1 className="text-6xl md:text-8xl font-bold text-white tracking-tighter leading-[0.85] uppercase">
                   {movie.title}
                 </h1>
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4 relative">
               {isLoggedIn ? (
                 <>
                   <button 
                     onClick={handleWatchlistAction} 
                     className={`flex items-center justify-center gap-3 px-8 py-4 rounded-sm text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-500 ${
                       inWatchlist 
-                      ? "bg-white/5 border border-white/10 text-zinc-400 hover:text-[#3b82f6] hover:border-[#3b82f6]/30" 
+                      ? "bg-white/5 border border-white/10 text-[#3b82f6]" 
                       : "bg-[#3b82f6] text-white shadow-[0_0_40px_rgba(59,130,246,0.3)] hover:scale-105"
                     }`}
                   >
@@ -222,23 +267,52 @@ export default function MovieDetailPage() {
                     Watchlist
                   </button>
 
-                  <button 
-                    onClick={handleToggleWatching}
-                    disabled={watched}
-                    className={`flex items-center justify-center gap-3 px-8 py-4 rounded-sm border text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-500 ${
-                      watched ? "opacity-30 cursor-not-allowed border-white/5 bg-white/5 text-zinc-600" :
-                      isInProgress 
-                      ? "bg-orange-500 border-orange-400 text-white shadow-[0_0_20px_rgba(249,115,22,0.4)]" 
-                      : "bg-white/5 border border-white/10 text-zinc-400 hover:text-orange-500 hover:border-orange-500/30"
-                    }`}
-                  >
-                    {isInProgress ? (
-                      <ArrowPathIcon className="h-4 w-4 animate-spin-slow" />
-                    ) : (
-                      <PlayIcon className="h-4 w-4 fill-current" />
+                  <div className="relative" ref={dropdownRef}>
+                    <button 
+                      onClick={() => setShowCollections(!showCollections)}
+                      className={`flex items-center justify-center gap-3 px-8 py-4 rounded-sm border text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-500 ${
+                        inAnyCollection
+                        ? "bg-violet-600/10 border-violet-500/40 text-violet-400" 
+                        : "bg-white/5 border border-white/10 text-zinc-400 hover:text-violet-400 hover:border-violet-500/30"
+                      }`}
+                    >
+                      {inAnyCollection ? <FolderIcon className="h-4 w-4 fill-current" /> : <FolderPlusIcon className="h-4 w-4" />}
+                      Collections
+                    </button>
+
+                    {showCollections && (
+                      <div className="absolute top-full mt-2 left-0 w-64 bg-[#0d0d0f] border border-white/10 rounded-sm shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-200 p-1 flex flex-col">
+                        <p className="text-[8px] font-black text-violet-500 uppercase tracking-widest p-3 border-b border-white/5 mb-1">Select Archive</p>
+                        <div className="max-h-60 overflow-y-auto custom-scrollbar">
+                          {collections.length > 0 ? collections.map(col => {
+                            const inCol = col.items.some(i => String(i.tmdbId) === String(id));
+                            return (
+                              <button
+                                key={col.id}
+                                onClick={() => handleCollectionToggle(col.id, inCol)}
+                                className="w-full flex items-center justify-between p-3 hover:bg-white/5 rounded-sm transition-colors group/item"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <FolderIcon className={`h-4 w-4 ${inCol ? 'text-violet-400' : 'text-zinc-600'}`} />
+                                  <span className={`text-[11px] font-bold ${inCol ? 'text-white' : 'text-zinc-400'}`}>{col.name}</span>
+                                </div>
+                                {inCol && <CheckIcon className="h-4 w-4 text-violet-400" />}
+                              </button>
+                            );
+                          }) : (
+                            <p className="p-4 text-[10px] text-zinc-600 uppercase font-black text-center">No archives found</p>
+                          )}
+                        </div>
+                        <button 
+                          onClick={() => { setShowCollections(false); setIsCreateModalOpen(true); }}
+                          className="mt-1 p-3 border-t border-white/5 flex items-center gap-3 hover:bg-violet-600/10 transition-colors rounded-sm group/btn text-left"
+                        >
+                          <PlusCircleIcon className="h-5 w-5 text-violet-500 group-hover/btn:scale-110 transition-transform" />
+                          <span className="text-[10px] font-black text-white uppercase tracking-widest">Create New Archive</span>
+                        </button>
+                      </div>
                     )}
-                    {isInProgress ? "Currently Watching" : "Start Watching"}
-                  </button>
+                  </div>
 
                   <button 
                     onClick={handleToggleWatched} 
@@ -251,11 +325,25 @@ export default function MovieDetailPage() {
                     {watched ? <CheckSolid className="h-4 w-4" /> : <EyeSolid className="h-4 w-4" />} 
                     {watched ? "Watched" : "Mark as Watched"}
                   </button>
+
+                  <button 
+                    onClick={handleToggleWatching}
+                    disabled={watched}
+                    className={`flex items-center justify-center gap-3 px-8 py-4 rounded-sm border text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-500 ${
+                      watched ? "opacity-30 cursor-not-allowed border-white/5 bg-white/5 text-zinc-600" :
+                      isInProgress 
+                      ? "bg-orange-500 border-orange-400 text-white shadow-[0_0_20px_rgba(249,115,22,0.4)]" 
+                      : "bg-white/5 border border-white/10 text-zinc-400 hover:text-orange-500 hover:border-orange-500/30"
+                    }`}
+                  >
+                    {isInProgress ? <ArrowPathIcon className="h-4 w-4 animate-spin-slow" /> : <PlayIcon className="h-4 w-4 fill-current" />}
+                    {isInProgress ? "In Progress" : "Currently Watching"}
+                  </button>
                 </>
               ) : (
                 <div className="px-6 py-4 rounded-sm bg-white/[0.02] border border-dashed border-white/10">
                    <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
-                     Sign in to manage watchlist & track progress
+                     Sign in to track your movies
                    </p>
                 </div>
               )}
@@ -270,17 +358,35 @@ export default function MovieDetailPage() {
               )}
             </div>
 
-            <div className="space-y-4 pt-4 max-w-3xl border-b border-white/5 pb-10">
-              <h2 className="text-[10px] font-black text-[#3b82f6] tracking-[0.3em] uppercase opacity-60">SYNOPSIS</h2>
-              <p className="text-lg leading-relaxed text-zinc-300 font-medium tracking-tight">{movie.overview}</p>
-            </div>
+            <div className="pt-10 border-t border-white/5 min-h-[500px]">
+              <div className="lg:hidden flex gap-2 mb-8">
+                <button onClick={() => setActiveTab("details")} className={`flex-1 py-3 rounded-sm text-[10px] font-black uppercase tracking-widest border transition-colors ${activeTab === "details" ? "bg-[#3b82f6] border-[#3b82f6] text-white" : "bg-white/5 border-white/10 text-zinc-500"}`}>Details</button>
+                <button onClick={() => setActiveTab("cast")} className={`flex-1 py-3 rounded-sm text-[10px] font-black uppercase tracking-widest border transition-colors ${activeTab === "cast" ? "bg-[#3b82f6] border-[#3b82f6] text-white" : "bg-white/5 border-white/10 text-zinc-500"}`}>Cast</button>
+              </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 pt-10 border-t border-white/5">
-              <MetaItem label="Release Year" value={movie.release_date ? new Date(movie.release_date).getFullYear() : "N/A"} icon={<CalendarIcon className="h-4 w-4" />} />
-              <MetaItem label="Runtime" value={`${movie.runtime || 0}m`} icon={<ClockIcon className="h-4 w-4" />} />
-              <MetaItem label="Status" value={movie.status || "Unknown"} icon={<InformationCircleIcon className="h-4 w-4" />} />
-              <MetaItem label="Rating" value={`${movie.vote_count || 0} Votes`} icon={<StarIcon className="h-4 w-4" />} />
+              <div className="bg-white/[0.01] border border-white/5 p-4 sm:p-8 rounded-sm backdrop-blur-sm">
+                {activeTab === "details" ? (
+                  <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                    <div className="space-y-4 max-w-3xl">
+                      <h2 className="text-[10px] font-black text-[#3b82f6] tracking-[0.3em] uppercase opacity-60">Synopsis</h2>
+                      <p className="text-lg leading-relaxed text-zinc-300 font-medium tracking-tight">{movie.overview}</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 pt-10 border-t border-white/5">
+                      <MetaItem label="Release Year" value={movie.release_date ? new Date(movie.release_date).getFullYear() : "N/A"} icon={<CalendarIcon className="h-4 w-4" />} />
+                      <MetaItem label="Runtime" value={`${movie.runtime || 0} min`} icon={<ClockIcon className="h-4 w-4" />} />
+                      <MetaItem label="Status" value={movie.status || "Unknown"} icon={<InformationCircleIcon className="h-4 w-4" />} />
+                      <MetaItem label="Rating" value={`${movie.vote_count || 0} Votes`} icon={<StarIcon className="h-4 w-4" />} />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="animate-in fade-in slide-in-from-bottom-4 zoom-in-95 duration-700">
+                    <CastSection id={Number(id)} type="movie" />
+                  </div>
+                )}
+              </div>
             </div>
+            
           </div>
         </div>
       </div>
